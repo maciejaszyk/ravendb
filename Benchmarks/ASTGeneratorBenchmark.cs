@@ -19,7 +19,7 @@ namespace Benchmark
         private List<string> queries;
         public ASTGeneratorBenchmark()
         {
-            queries = JsonConvert.DeserializeObject<List<string>>(System.IO.File.ReadAllText(@"D:\out2.json")).ToList();
+            queries = JsonConvert.DeserializeObject<List<string>>(System.IO.File.ReadAllText(@"data.json")).ToList();
             Console.WriteLine("Queries count: " + queries.Count);
         }
 
@@ -39,7 +39,7 @@ namespace Benchmark
         {
             foreach (string query in queries)
             {
-
+                
                 var queryParser = new QueryParser();
                 queryParser.Init(query);
 
