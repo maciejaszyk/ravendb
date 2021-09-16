@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -42,11 +43,11 @@ namespace Corax.Queries
             {
                 if (typeof(T) == typeof(long))
                 {
-                    return Math.Sign((long)(object)y - (long)(object)x);
+                    return Math.Sign((long)(object)x - (long)(object)y);
                 }
                 else if (typeof(T) == typeof(double))
                 {
-                    return Math.Sign((double)(object)y - (double)(object)x);
+                    return Math.Sign((double)(object)x - (double)(object)y);
                 }
                 
                 throw new NotSupportedException("Not supported");
@@ -254,8 +255,8 @@ namespace Corax.Queries
                         return comparer.CompareSequence(resultX, resultY);
                     }
                     else if (readX)
-                        return 1;
-                    return -1;
+                        return -1;
+                    return 1;
                 }
 
                 static int CompareWithLoadNumerical<T>(ref DescendingMatchComparer comparer, long x, long y) where T : unmanaged
@@ -271,8 +272,8 @@ namespace Corax.Queries
                         return comparer.CompareNumerical(resultX, resultY);
                     }
                     else if (readX)
-                        return 1;
-                    return -1;
+                        return -1;
+                    return 1;
                 }
 
                 _compareFunc = entryFieldType switch
