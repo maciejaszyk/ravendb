@@ -199,13 +199,14 @@ namespace Raven.Server.Documents.Indexes.MapReduce.Auto
 
                 json.TryGet(nameof(AutoIndexField.Name), out string name);
                 json.TryGet(nameof(AutoIndexField.Aggregation), out int aggregationAsInt);
-
+                json.TryGet(nameof(AutoIndexField.Name), out int id);
                 var field = new AutoIndexField
                 {
                     Name = name,
                     Storage = FieldStorage.No,
                     Indexing = AutoFieldIndexing.Default,
-                    Aggregation = (AggregationOperation)aggregationAsInt
+                    Aggregation = (AggregationOperation)aggregationAsInt,
+                    Id = id
                 };
 
                 mapFields[i] = field;
