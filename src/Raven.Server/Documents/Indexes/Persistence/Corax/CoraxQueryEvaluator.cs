@@ -28,8 +28,6 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
         {
             _query = query;
             IQueryMatch result = null;
-            if (query.Metadata.Query.Where is null)
-                throw new NotImplementedException("Corax all docs.");
             result = Evaluate(query.Metadata.Query.Where);
             if (query.Metadata.Query.OrderBy != null)
                 result = OrderByEvaluate(result, fieldsToFetch, query.Metadata.Query.OrderBy);
@@ -70,7 +68,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                             return null;
                     }
                 case null:
-                    throw new NotSupportedException();
+                    return _searcher.AllEntries();
                 case InExpression ie:
                     return (ie.Source, ie.Values) switch
                     {
