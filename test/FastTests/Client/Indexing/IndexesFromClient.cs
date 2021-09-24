@@ -306,7 +306,7 @@ namespace FastTests.Client.Indexing
         }
 
         [Theory]
-        [SearchEngineClassData(SearchEngineType.Lucene)]
+        [SearchEngineClassData]
         public async Task GetTerms(string searchEngineType)
         {
             using (var store = GetDocumentStore(Options.ForSearchEngine(searchEngineType)))
@@ -334,7 +334,7 @@ namespace FastTests.Client.Indexing
 
                 var terms = await store
                     .Maintenance
-                    .SendAsync(new GetTermsOperation(indexName, "Name", null, 128));
+                    .SendAsync(Indexes.SetSearchEngine(searchEngineType).GetTerms(indexName, "Name", null, 128 ));
 
                 Assert.Equal(2, terms.Length);
                 Assert.True(terms.Any(x => string.Equals(x, "Fitzchak", StringComparison.OrdinalIgnoreCase)));

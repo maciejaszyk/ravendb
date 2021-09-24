@@ -53,7 +53,8 @@ namespace FastTests
     public abstract partial class RavenTestBase : TestBase
     {
         public static BackupTestBase Backup => BackupTestBase.Instance.Value;
-
+        public IndexesTestBase Indexes => _indexes.Value;
+       
         protected readonly ConcurrentSet<DocumentStore> CreatedStores = new ConcurrentSet<DocumentStore>();
 
         protected RavenTestBase(ITestOutputHelper output) : base(output)
@@ -69,7 +70,7 @@ namespace FastTests
         {
             store.Maintenance.Send(new CreateSampleDataOperation(operateOnTypes));
         }
-
+        
         protected static async Task CreateLegacyNorthwindDatabase(DocumentStore store)
         {
             using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Tests.Infrastructure.Data.Northwind.4.2.ravendbdump"))
@@ -351,6 +352,7 @@ namespace FastTests
                     };
 
                     options.ModifyDocumentStore?.Invoke(store);
+                    
 
                     //This gives too much error details in most cases, we don't need this now
                     store.RequestExecutorCreated += (sender, executor) =>

@@ -81,7 +81,7 @@ namespace SlowTests.Core.Commands
 
                 WaitForIndexing(store);
 
-                var terms = store.Maintenance.Send(new GetTermsOperation("test", "Name", null, 10))
+                var terms = store.Maintenance.Send(Indexes.GetTerms("test", "Name", null, 10))
                     .OrderBy(x => x)
                     .ToArray();
 
