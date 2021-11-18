@@ -16,6 +16,18 @@ describe("UPDATE statement", function () {
         expect(updateStatement)
             .toBeInstanceOf(UpdateStatementContext);
     });
+
+    it("doesn't throw with json inside it", function () {
+        const { parseTree, parser } = parseRql("from test where id() == 't' update { for(var i = 0; i< this.characters.length; i++) { var cur = this.characters[i]; cur[\"@metadata\"] = {\"@collection\": \"Characters\" }; put(cur.name, cur); } } ");
+
+        expect(parser.numberOfSyntaxErrors)
+            .toEqual(0);
+
+        const updateStatement = parseTree.updateStatement();
+
+        expect(updateStatement)
+            .toBeInstanceOf(UpdateStatementContext);
+    });
     
     it("throws when brackets aren't symmetrical", function () {
         const { parseTree, parser } = parseRql("from Orders update { for (var i = 0; i < 10; i++ ) { put(\"orders/\", this); } }" +
