@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using Corax;
 using Corax.Queries;
+using Nest;
 using Raven.Client.Exceptions;
 using Raven.Server.Documents.Queries;
 using Raven.Server.Documents.Queries.AST;
@@ -25,7 +26,7 @@ public static class CoraxQueryBuilder
 
     public static IQueryMatch BuildQuery(IndexSearcher indexSearcher, TransactionOperationContext serverContext, DocumentsOperationContext context,
         QueryMetadata metadata,
-        Index index, BlittableJsonReaderObject parameters, QueryBuilderFactories factories, IndexFieldsMapping indexMapping = null, FieldsToFetch queryMapping = null,
+        Index index, BlittableJsonReaderObject parameters, QueryBuilderFactories factories, IndexFieldsMapping indexMapping = null, FieldsToFetch queryMapping = null, Dictionary<string, object> highlightingTerms = null,
         List<string> buildSteps = null, int take = TakeAll)
     {
         using (CultureHelper.EnsureInvariantCulture())
@@ -38,7 +39,8 @@ public static class CoraxQueryBuilder
                     factories, default, false,
                     queryMapping: queryMapping,
                     buildSteps: buildSteps,
-                    indexMapping: indexMapping);
+                    indexMapping: indexMapping,
+                    highlightingTerms: highlightingTerms);
             }
             else
             {
@@ -62,7 +64,7 @@ public static class CoraxQueryBuilder
         QueryExpression expression, QueryMetadata metadata, Index index,
         BlittableJsonReaderObject parameters, QueryBuilderFactories factories, TScoreFunction scoreFunction, bool isNegated, IndexFieldsMapping indexMapping,
         FieldsToFetch queryMapping, bool exact = false, int? proximity = null, bool secondary = false,
-        List<string> buildSteps = null, int take = TakeAll)
+        List<string> buildSteps = null, Dictionary<string, object> highlightingTerms = null, int take = TakeAll)
         where TScoreFunction : IQueryScoreFunction
     {
         if (RuntimeHelpers.TryEnsureSufficientExecutionStack() == false)
@@ -115,9 +117,9 @@ public static class CoraxQueryBuilder
                 case OperatorType.Or:
                 {
                     var left = ToCoraxQuery(indexSearcher, serverContext, documentsContext, query, @where.Left, metadata, index, parameters,
-                        factories, scoreFunction, isNegated, indexMapping, queryMapping, exact, secondary: secondary, buildSteps: buildSteps, take: take);
+                        factories, scoreFunction, isNegated, indexMapping, queryMapping, exact, secondary: secondary, buildSteps: buildSteps, highlightingTerms: highlightingTerms, take: take);
                     var right = ToCoraxQuery(indexSearcher, serverContext, documentsContext, query, @where.Right, metadata, index, parameters,
-                        factories, scoreFunction, isNegated, indexMapping, queryMapping, exact, secondary: true, buildSteps: buildSteps, take: take);
+                        factories, scoreFunction, isNegated, indexMapping, queryMapping, exact, secondary: true, buildSteps: buildSteps, highlightingTerms: highlightingTerms, take: take);
 
                     buildSteps?.Add(
                         $"OR operator: left - {left.GetType().FullName} ({left}) assembly: {left.GetType().Assembly.FullName} assemby location: {left.GetType().Assembly.Location} , right - {right.GetType().FullName} ({right}) assemlby: {right.GetType().Assembly.FullName} assemby location: {right.GetType().Assembly.Location}");
@@ -156,6 +158,9 @@ public static class CoraxQueryBuilder
                         _ => null
                     };
 
+                    if (valueType is ValueTokenType.Double or ValueTokenType.Long)
+                        highlightingTerms?.TryAdd(fieldName, value);
+                    
                     if (match is null)
                         QueryBuilderHelper.ThrowUnhandledValueTokenType(valueType);
 
@@ -164,7 +169,8 @@ public static class CoraxQueryBuilder
                     IQueryMatch HandleStringUnaryMatch()
                     {
                         var valueAsString = QueryBuilderHelper.GetValueAsString(value);
-
+                        highlightingTerms?.TryAdd(fieldName, valueAsString);
+                        
                         if (exact && metadata.IsDynamic)
                         {
                             fieldName = new QueryFieldName(AutoIndexField.GetExactAutoIndexFieldName(fieldName), fieldName.IsQuoted);
@@ -204,7 +210,7 @@ public static class CoraxQueryBuilder
         {
             buildSteps?.Add($"Between: {expression.Type} - {be}");
 
-            return TranslateBetweenQuery(indexSearcher, query, metadata, index, parameters, exact, be, secondary, scoreFunction, isNegated, indexMapping, queryMapping,
+            return TranslateBetweenQuery(indexSearcher, query, metadata, index, parameters, exact, be, secondary, scoreFunction, isNegated, indexMapping, queryMapping, highlightingTerms,
                 take);
         }
 
@@ -232,6 +238,7 @@ public static class CoraxQueryBuilder
             {
                 matches.Add(tuple.Value);
             }
+            highlightingTerms?.TryAdd(fieldName, matches);
 
             return (isNegated, scoreFunction) switch
             {
@@ -259,14 +266,14 @@ public static class CoraxQueryBuilder
             switch (methodType)
             {
                 case MethodType.Search:
-                    return HandleSearch(indexSearcher, query, me, metadata, parameters, proximity, scoreFunction, isNegated, indexMapping, queryMapping, index, take);
+                    return HandleSearch(indexSearcher, query, me, metadata, parameters, proximity, scoreFunction, isNegated, indexMapping, queryMapping, index, highlightingTerms, take);
                 case MethodType.Boost:
                     return HandleBoost(indexSearcher, serverContext, documentsContext, query, me, metadata, index, parameters, factories, exact, isNegated,
-                        indexMapping, queryMapping, take, buildSteps);
+                        indexMapping, queryMapping, highlightingTerms, take, buildSteps);
                 case MethodType.StartsWith:
-                    return HandleStartsWith(indexSearcher, query, me, metadata, index, parameters, exact, isNegated, scoreFunction, indexMapping, queryMapping, take);
+                    return HandleStartsWith(indexSearcher, query, me, metadata, index, parameters, exact, isNegated, scoreFunction, indexMapping, queryMapping, highlightingTerms, take);
                 case MethodType.EndsWith:
-                    return HandleEndsWith(indexSearcher, query, me, metadata, index, parameters, exact, isNegated, scoreFunction, indexMapping, queryMapping, take);
+                    return HandleEndsWith(indexSearcher, query, me, metadata, index, parameters, exact, isNegated, scoreFunction, indexMapping, queryMapping, highlightingTerms, take);
                 case MethodType.Exists:
                     return HandleExists(indexSearcher, query, parameters, me, metadata, scoreFunction);
 
@@ -283,6 +290,7 @@ public static class CoraxQueryBuilder
         BlittableJsonReaderObject parameters,
         bool exact,
         BetweenExpression be, bool secondary, TScoreFunction scoreFunction, bool isNegated, IndexFieldsMapping indexMapping, FieldsToFetch queryMapping,
+        Dictionary<string, object> highlightingTerms = null,
         int take = TakeAll)
         where TScoreFunction : IQueryScoreFunction
     {
@@ -301,6 +309,11 @@ public static class CoraxQueryBuilder
             _ => throw new ArgumentOutOfRangeException()
         };
 
+        if ((valueFirstType, valueSecondType) is (ValueTokenType.Double, ValueTokenType.Double) or (ValueTokenType.Long, ValueTokenType.Long))
+        {
+            highlightingTerms?.TryAdd(fieldName, (valueFirst, valueSecond));
+        }
+
         return scoreFunction is NullScoreFunction
             ? match
             : indexSearcher.Boost(match, scoreFunction);
@@ -310,6 +323,8 @@ public static class CoraxQueryBuilder
             exact = QueryBuilderHelper.IsExact(index, exact, fieldName);
             var valueFirstAsString = QueryBuilderHelper.GetValueAsString(valueFirst);
             var valueSecondAsString = QueryBuilderHelper.GetValueAsString(valueSecond);
+            highlightingTerms?.TryAdd(fieldName, (valueFirstAsString, valueSecondAsString));
+
             return indexSearcher.Between(indexSearcher.AllEntries(), fieldId, valueFirstAsString, valueSecondAsString, isNegated, take);
         }
     }
@@ -326,6 +341,7 @@ public static class CoraxQueryBuilder
     private static IQueryMatch HandleStartsWith<TScoreFunction>(IndexSearcher indexSearcher, Query query, MethodExpression expression, QueryMetadata metadata,
         Index index,
         BlittableJsonReaderObject parameters, bool exact, bool isNegated, TScoreFunction scoreFunction, IndexFieldsMapping indexMapping, FieldsToFetch queryMapping,
+        Dictionary<string, object> highlightingTerms = null,
         int take = TakeAll)
         where TScoreFunction : IQueryScoreFunction
     {
@@ -342,12 +358,15 @@ public static class CoraxQueryBuilder
             fieldName = new QueryFieldName(AutoIndexField.GetExactAutoIndexFieldName(fieldName.Value), fieldName.IsQuoted);
 
         var fieldId = QueryBuilderHelper.GetFieldId(fieldName, index, indexMapping, queryMapping);
-
+        
+        highlightingTerms?.TryAdd(fieldName, valueAsString);
+        
         return indexSearcher.StartWithQuery(fieldName, valueAsString, scoreFunction, isNegated, fieldId);
     }
 
     private static IQueryMatch HandleEndsWith<TScoreFunction>(IndexSearcher indexSearcher, Query query, MethodExpression expression, QueryMetadata metadata, Index index,
         BlittableJsonReaderObject parameters, bool exact, bool isNegated, TScoreFunction scoreFunction, IndexFieldsMapping indexMapping, FieldsToFetch queryMapping,
+        Dictionary<string, object> highlightingTerms = null,
         int take = TakeAll)
         where TScoreFunction : IQueryScoreFunction
     {
@@ -365,12 +384,15 @@ public static class CoraxQueryBuilder
 
         var fieldId = QueryBuilderHelper.GetFieldId(fieldName, index, indexMapping, queryMapping);
 
+        highlightingTerms?.TryAdd(fieldName, valueAsString);
+
         return indexSearcher.EndsWithQuery(fieldName, valueAsString, scoreFunction, isNegated, fieldId);
     }
 
     private static IQueryMatch HandleBoost(IndexSearcher indexSearcher, TransactionOperationContext serverContext, DocumentsOperationContext context, Query query,
         MethodExpression expression, QueryMetadata metadata, Index index,
         BlittableJsonReaderObject parameters, QueryBuilderFactories factories, bool exact, bool isNegated, IndexFieldsMapping indexMapping, FieldsToFetch queryMapping,
+        Dictionary<string, object> highlightingTerms = null,
         int take = TakeAll,
         List<string> buildSteps = null)
     {
@@ -414,12 +436,16 @@ public static class CoraxQueryBuilder
 
         return ToCoraxQuery(indexSearcher, serverContext, context, query, expression.Arguments[0], metadata, index, parameters, factories, scoreFunction, isNegated,
             indexMapping, queryMapping, exact,
-            buildSteps: buildSteps, take: take);
+            buildSteps: buildSteps,
+            highlightingTerms: highlightingTerms,
+            take: take);
     }
 
     private static IQueryMatch HandleSearch<TScoreFunction>(IndexSearcher indexSearcher, Query query, MethodExpression expression, QueryMetadata metadata,
         BlittableJsonReaderObject parameters, int? proximity, TScoreFunction scoreFunction, bool isNegated, IndexFieldsMapping indexMapping, FieldsToFetch queryMapping,
-        Index index, int take = TakeAll)
+        Index index,
+        Dictionary<string, object> highlightingTerms = null,
+        int take = TakeAll)
         where TScoreFunction : IQueryScoreFunction
     {
         QueryFieldName fieldName;
@@ -476,6 +502,8 @@ public static class CoraxQueryBuilder
                 QueryBuilderHelper.ThrowInvalidOperatorInSearch(metadata, parameters, fieldExpression);
         }
 
+        highlightingTerms?.TryAdd(fieldName, valueAsString);
+        
         return indexSearcher.SearchQuery(fieldName, valueAsString, scoreFunction, @operator, fieldId, isNegated);
     }
 
