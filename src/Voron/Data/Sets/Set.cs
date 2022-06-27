@@ -514,8 +514,16 @@ namespace Voron.Data.Sets
         {
             private readonly Set _parent;
             private SetLeafPage.Iterator _it;
-
+#if !DEBUG
             public long Current;
+#else
+            private long? _current;
+            public long Current
+            {
+                get => _current.Value; // will throw here if not explicitly set
+                set => _current = value;
+            }
+#endif
 
             public Iterator(Set parent)
             {

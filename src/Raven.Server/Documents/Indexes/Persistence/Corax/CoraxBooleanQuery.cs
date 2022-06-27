@@ -190,11 +190,11 @@ public class CoraxBooleanQuery : IQueryMatch
                 break;
             
             IQueryMatch second = _indexSearcher.TermQuery(query.Name, query.TermAsString, query.FieldId);
-                if (query.Operation is UnaryMatchOperation.NotEquals)
-                {
-                    second = _indexSearcher.AndNot(_indexSearcher.ExistsQuery(query.Name), second);
-                    HasInnerBinary = true;
-                }
+            if (query.Operation is UnaryMatchOperation.NotEquals)
+            {
+                second = _indexSearcher.AndNot(_indexSearcher.ExistsQuery(query.Name), second);
+                HasInnerBinary = true;
+            }
                 
 
             if (baseMatch == null)

@@ -242,7 +242,9 @@ namespace Corax.Queries
                 var it = term._set;
 
                 it.MaybeSeek(buffer[0] - 1);
-
+                if (it.MoveNext() == false)
+                    goto End;
+                
                 // We update the current value we want to work with.
                 var current = it.Current;
 

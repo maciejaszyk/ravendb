@@ -263,30 +263,33 @@ namespace Voron.Data.Containers
             container.Header.OnFreeList = false; // we take it out now..., we'll add to the free list when we delete from it
             var rootPage = llt.ModifyPage(containerId);
             var rootContainer = new Container(rootPage);
-            
 
-            while (true)
+            int i = 0;
+            for (; i < 1024; i++) // ensure that we have bounded time to find a free page
             {
                 var freeListStateSpan = rootContainer.GetItem(ContainerPageHeader.FreeListOffset);
                 var freeList = new Set(llt, FreePagesSetName, MemoryMarshal.AsRef<SetState>(freeListStateSpan));
                 var it = freeList.Iterate();
-                {
-                    if (it.Seek(0) == false)
-                        break;
+                if (it.MoveNext() == false)
+                    break;
+                
+                var page = llt.ModifyPage(it.Current);
+                var maybe = new Container(page);
+                // we want to ensure that the free list isn't too big...
+                // if we don't have space here, we'll discard it from the free list
+                maybe.Header.OnFreeList = false;
+                ModifyMetadataList(llt, rootContainer, FreePagesSetName, ContainerPageHeader.FreeListOffset, add: false, page.PageNumber);
+                if (maybe.HasEnoughSpaceFor(size + MinimumAdditionalFreeSpaceToConsider) == false)
+                    continue;
+                // we register it as the next free page
+                rootContainer.Header.NextFreePage = page.PageNumber;
+                container = maybe;
+                return;
+            }
 
-                    var page = llt.ModifyPage(it.Current);
-                    var maybe = new Container(page);
-                    // we want to ensure that the free list isn't too big...
-                    // if we don't have space here, we'll discard it from the free list
-                    maybe.Header.OnFreeList = false;
-                    ModifyMetadataList(llt, rootContainer, FreePagesSetName, ContainerPageHeader.FreeListOffset, add: false, page.PageNumber);
-                    if (maybe.HasEnoughSpaceFor(size + MinimumAdditionalFreeSpaceToConsider) == false)
-                        continue;
-                    // we register it as the next free page
-                    rootContainer.Header.NextFreePage = page.PageNumber;
-                    container = maybe;
-                    return;
-                }
+            if (i == 1024)
+            {
+                Console.WriteLine();
             }
 
             // no existing pages remaining, allocate new one
@@ -313,7 +316,7 @@ namespace Voron.Data.Containers
                 return list;
 
             Span<long> items = stackalloc long[256];
-            do
+            while (it.MoveNext())
             {
                 var page = llt.GetPage(it.Current);
                 offset = 0;
@@ -327,7 +330,7 @@ namespace Voron.Data.Containers
                     //need read to the end of page
                 } while (itemsLeftOnCurrentPage > 0);
                 
-            } while (it.MoveNext());
+            } 
 
             return list;
         }
@@ -482,7 +485,7 @@ namespace Voron.Data.Containers
 
             if (container.Header.OnFreeList)
                 return;
-
+            
             int containerSpaceUsed = container.SpaceUsed(entriesOffsets);
             if (container.Header.OnFreeList == false && // already on it, can skip. 
                 containerSpaceUsed + (Constants.Storage.PageSize/4) <= Constants.Storage.PageSize && // has at least 25% free
