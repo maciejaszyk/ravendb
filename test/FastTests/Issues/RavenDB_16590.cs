@@ -73,7 +73,9 @@ namespace FastTests.Issues
                 "Indexing.TimeSinceLastQueryAfterWhichDeepCleanupCanBeExecutedInMin",
                 "Indexing.Throttling.TimeIntervalInMs",
                 "Indexing.TransactionSizeLimitInMb",
-                "Indexing.Static.SearchEngineType"
+                "Indexing.Static.SearchEngineType",
+                "Indexing.OrderByScoreAutomaticallyWhenBoostingIsInvolved",
+                "Indexing.UseCompoundFileInMerging"
             };
 
             var sortedStudioList = propertiesDeclaredInStudio.OrderBy(x => x).ToList();
