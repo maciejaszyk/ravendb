@@ -75,7 +75,8 @@ namespace FastTests.Issues
                 "Indexing.TransactionSizeLimitInMb",
                 "Indexing.Static.SearchEngineType",
                 "Indexing.OrderByScoreAutomaticallyWhenBoostingIsInvolved",
-                "Indexing.UseCompoundFileInMerging"
+                "Indexing.UseCompoundFileInMerging",
+                "Indexing.Lucene.IndexInputType"
             };
 
             var sortedStudioList = propertiesDeclaredInStudio.OrderBy(x => x).ToList();
