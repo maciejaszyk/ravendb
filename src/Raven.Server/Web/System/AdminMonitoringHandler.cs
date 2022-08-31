@@ -118,6 +118,8 @@ namespace Raven.Server.Web.System
                 ? (SystemTime.UtcNow - Server.Statistics.LastAuthorizedNonClusterAdminRequestTime.Value).TotalSeconds
                 : (double?)null;
 
+            result.AverageDuration = Server.Metrics.Requests.AverageDuration.GetRate();
+            
             return result;
         }
 
@@ -159,7 +161,8 @@ namespace Raven.Server.Web.System
             result.TotalSwapSizeInMb = memoryInfoResult.TotalSwapSize.GetValue(SizeUnit.Megabytes);
             result.TotalSwapUsageInMb = memoryInfoResult.TotalSwapUsage.GetValue(SizeUnit.Megabytes);
             result.WorkingSetSwapUsageInMb = memoryInfoResult.WorkingSetSwapUsage.GetValue(SizeUnit.Megabytes);
-
+            result.ManagedMemoryInMb = AbstractLowMemoryMonitor.GetManagedMemoryInBytes() / (1024 * 1024);
+            
             var totalDirtyInBytes = MemoryInformation.GetDirtyMemoryState().TotalDirtyInBytes;
             result.TotalDirtyInMb = new Size(totalDirtyInBytes, SizeUnit.Bytes).GetValue(SizeUnit.Megabytes);
 

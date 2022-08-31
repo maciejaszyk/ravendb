@@ -113,6 +113,7 @@ namespace Raven.Server.Utils.Monitoring
 
     public class MemoryMetrics
     {
+        public long ManagedMemoryInMb { get; set; }
         public long InstalledMemoryInMb { get; set; }
         public long PhysicalMemoryInMb { get; set; }
         public long AllocatedMemoryInMb { get; set; }
@@ -133,7 +134,8 @@ namespace Raven.Server.Utils.Monitoring
                 [nameof(TotalSwapSizeInMb)] = TotalSwapSizeInMb,
                 [nameof(TotalSwapUsageInMb)] = TotalSwapUsageInMb,
                 [nameof(WorkingSetSwapUsageInMb)] = WorkingSetSwapUsageInMb,
-                [nameof(TotalDirtyInMb)] = TotalDirtyInMb
+                [nameof(TotalDirtyInMb)] = TotalDirtyInMb,
+                [nameof(ManagedMemoryInMb)] = ManagedMemoryInMb
             };
         }
     }
@@ -194,7 +196,8 @@ namespace Raven.Server.Utils.Monitoring
         public double RequestsPerSec { get; set; }
         public double? LastRequestTimeInSec { get; set; }
         public double? LastAuthorizedNonClusterAdminRequestTimeInSec { get; set; }
-
+        public double? AverageDuration { get; set; }
+        
         public DynamicJsonValue ToJson()
         {
             return new DynamicJsonValue
@@ -204,7 +207,9 @@ namespace Raven.Server.Utils.Monitoring
                 [nameof(TotalRequests)] = TotalRequests,
                 [nameof(RequestsPerSec)] = RequestsPerSec,
                 [nameof(LastRequestTimeInSec)] = LastRequestTimeInSec,
-                [nameof(LastAuthorizedNonClusterAdminRequestTimeInSec)] = LastAuthorizedNonClusterAdminRequestTimeInSec
+                [nameof(LastAuthorizedNonClusterAdminRequestTimeInSec)] = LastAuthorizedNonClusterAdminRequestTimeInSec,
+                [nameof(AverageDuration)] = AverageDuration
+                
             };
         }
     }
