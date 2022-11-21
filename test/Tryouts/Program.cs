@@ -95,13 +95,12 @@ public static class Program
         csvWriter.WriteField("MetricId");
         csvWriter.NextRecord();
 
-        using var session = DocumentStoreHolder.Store.OpenSession(new SessionOptions { NoCaching = true });
+        using var session = DocumentStoreHolder.Store.OpenSession(new SessionOptions {NoCaching = true});
 
         var queries = session.Query<QueryGenerated>()
-                                        .OrderBy(i => i.Id)
-                                        .Select(i => i.Query)
-                                        //.Take(128)
-                                        .ToList();
+            .OrderBy(i => i.Id)
+            //.Take(128)
+            .ToList();
         //.Select(i => i.Replace("Questions/Search", "QuestionSearchCustom")).ToList();
         //var queries = session.Query<MapReduceQuery>()
         //                                .OrderBy(i => i.Id)
@@ -117,10 +116,21 @@ public static class Program
         var stopwatch = new Stopwatch();
         stopwatch.Start();
 
-        using var innerSession = DocumentStoreHolder.Store.OpenSession(new SessionOptions { NoCaching = true });
-        foreach (var query in queries)
+        using var innerSession = DocumentStoreHolder.Store.OpenSession(new SessionOptions {NoCaching = true});
+        foreach (var query in queries.Where(i => i.Query.Contains("boost") == true && i.Query.Contains("true and ") == false).OrderBy(i => i.Query.Length))
         {
-            var count = innerSession.Advanced.RawQuery<QuestionTags>(query).NoCaching().NoTracking().Statistics(out var stats).Count();
+            Console.WriteLine("Press F to next query");
+         //   Console.ReadKey();
+            Console.WriteLine($"\n\n ID {query.Id}");
+            Console.WriteLine(query.Query);
+            int count = 0;
+
+            foreach (var x in Enumerable.Range(0, 20))
+            {
+                count = innerSession.Advanced.RawQuery<QuestionTags>(query.Query).NoCaching().NoTracking().Statistics(out var stats).Count();
+            }
+
+            Console.WriteLine($"{count}\n\n");
         }
 
         //Parallel.ForEach(queries, (term) =>
@@ -142,13 +152,13 @@ public static class Program
     }
 
 
-
     record QuestionTags(string Tag, long Count, long Answers, long AcceptedAnswers);
+
     record MapReduceQuery(string Query, long Results, string Id = null);
 
     public static void GenerateMapReduceQueries()
     {
-        using var session = DocumentStoreHolder.Store.OpenSession(new SessionOptions { NoCaching = true });
+        using var session = DocumentStoreHolder.Store.OpenSession(new SessionOptions {NoCaching = true});
 
         var entries = session.Query<QuestionTags>("Questions/Tags").OrderByDescending(i => i.Answers, OrderingType.Long).ToList();
         var maxAcceptedAnswers = entries[^1].AcceptedAnswers;
@@ -156,9 +166,9 @@ public static class Program
 
         Parallel.For(0, 10_000, (i) =>
         {
-            using var innerSession = DocumentStoreHolder.Store.OpenSession(new SessionOptions { NoCaching = true });
+            using var innerSession = DocumentStoreHolder.Store.OpenSession(new SessionOptions {NoCaching = true});
             var count = 0;
-        Repeat:
+            Repeat:
             var leftSide = random.Next(0, entries.Count);
             if (leftSide == entries.Count)
                 goto Repeat;
@@ -168,8 +178,10 @@ public static class Program
             var leftAcceptedAnswer = random.Next(int.MinValue, (int)entries[leftSide].AcceptedAnswers + (leftInclusive ? 1 : 0));
             var rightAcceptedAnswer = random.Next((int)entries[rightSide].AcceptedAnswers + (rightInclusive ? 0 : 1), int.MaxValue);
 
-            var leftSideQuery = $"AcceptedAnswers  {(leftInclusive ? " >= " : " > ")} {leftAcceptedAnswer} and AcceptedAnswers {(rightInclusive ? " <= " : " < ")} {rightAcceptedAnswer}";
-            var innerData = innerSession.Advanced.RawQuery<QuestionTags>($"from index 'Questions/Tags' where {leftSideQuery}  order by Answers as long asc").NoCaching().NoTracking().ToList();
+            var leftSideQuery =
+                $"AcceptedAnswers  {(leftInclusive ? " >= " : " > ")} {leftAcceptedAnswer} and AcceptedAnswers {(rightInclusive ? " <= " : " < ")} {rightAcceptedAnswer}";
+            var innerData = innerSession.Advanced.RawQuery<QuestionTags>($"from index 'Questions/Tags' where {leftSideQuery}  order by Answers as long asc").NoCaching()
+                .NoTracking().ToList();
             var query = $"from index 'Questions/Tags' where ({leftSideQuery})";
             count = innerData.Count;
 
@@ -178,8 +190,6 @@ public static class Program
                 goto Repeat;
             if (innerData.Count < 50)
                 goto Store;
-
-
 
 
             RightSideRepeat:
@@ -197,23 +207,20 @@ public static class Program
 
             var innerLeftInclusive = random.Next() % 2 == 0;
             var innerRightInclusive = random.Next() % 2 == 0;
-            var rightSideQuery = $"Answers  {(innerLeftInclusive ? " >= " : " > ")} {innerData[innerLeftSide].Answers} and Answers {(innerRightInclusive ? " <= " : " < ")} {innerData[innerRightSide].Answers}";
+            var rightSideQuery =
+                $"Answers  {(innerLeftInclusive ? " >= " : " > ")} {innerData[innerLeftSide].Answers} and Answers {(innerRightInclusive ? " <= " : " < ")} {innerData[innerRightSide].Answers}";
             query = $"from index 'Questions/Tags' where ({leftSideQuery}) and ({rightSideQuery})";
             var innerQuery = innerSession.Advanced.RawQuery<QuestionTags>(query).NoCaching().NoTracking().ToList();
             if (innerQuery.Count == 0)
                 goto RightSideRepeat;
             count = innerQuery.Count;
 
-        Store:
+            Store:
             Console.WriteLine($"Found Query {query}");
 
             innerSession.Store(new MapReduceQuery(query, count));
             innerSession.SaveChanges();
         });
-
-
-
-
     }
 
 
@@ -233,11 +240,12 @@ public static class Program
     }
 
     record SimpleQuery(string Query, int Results, string Id = null);
+
     public static void InsertQueriesIntoRaven()
     {
         long counter = 0;
         List<SimpleQuery> record = new();
-        using var session = DocumentStoreHolder.Store.OpenSession(new SessionOptions { NoCaching = true });
+        using var session = DocumentStoreHolder.Store.OpenSession(new SessionOptions {NoCaching = true});
         using (StreamReader sr = new StreamReader(@"questions_search.reqs"))
         {
             while (sr.Peek() >= 0)
@@ -258,7 +266,6 @@ public static class Program
                 }
             }
         }
-
     }
 
     #endregion
@@ -266,7 +273,7 @@ public static class Program
 
     public static void SaveQueriesIntoFile()
     {
-        using var session = DocumentStoreHolder.Store.OpenSession(new SessionOptions { NoCaching = true });
+        using var session = DocumentStoreHolder.Store.OpenSession(new SessionOptions {NoCaching = true});
 
         var queries = session.Query<QueryGenerated>().Select(i => i.Query);
 
@@ -287,8 +294,6 @@ public static class Program
 
     #region QueryGenerators
 
-
-
     public static void GenerateComplexQueries()
     {
         using var session = DocumentStoreHolder.Store.OpenSession();
@@ -306,7 +311,7 @@ public static class Program
             var count = session.Advanced.RawQuery<Item>(query).Count();
             if (count < 1000 * stackDepth)
             {
-                list.Add(new QueryGenerated() { Query = query, Count = count, Depth = stackDepth, AverageReqTime = 0 });
+                list.Add(new QueryGenerated() {Query = query, Count = count, Depth = stackDepth, AverageReqTime = 0});
 
                 Console.WriteLine("bingo");
             }
@@ -386,7 +391,9 @@ public static class Program
 
 
     public const int ChunkSize = 1024;
+
     record AndQueries(string Id, int Count, string LeftId, string RightId);
+
     /// <summary>
     /// Generates AND clauses with inner ORs. We're doing this by randomly checking intersection of OR generated in GenerateOrQueries
     /// </summary>
@@ -449,7 +456,7 @@ public static class Program
         //Lets create 10k chunks and discover chunks
 
         //Sometimes we've added to much terms. Lets clean this up.
-        var operation = DocumentStoreHolder.Store.Operations.Send(new DeleteByQueryOperation(new IndexQuery { Query = "from 'OrQueries' where Terms.Length > 20" }));
+        var operation = DocumentStoreHolder.Store.Operations.Send(new DeleteByQueryOperation(new IndexQuery {Query = "from 'OrQueries' where Terms.Length > 20"}));
 
 
         var results = session.Query<TermFrequency>().OrderByDescending(i => i.Count, OrderingType.Long).ToList();
@@ -477,7 +484,7 @@ public static class Program
         }
 
         results = null;
-        var averageOutputSize = new int[] { 64, 128, 256, 512, 1024, 2048, 4096 };
+        var averageOutputSize = new int[] {64, 128, 256, 512, 1024, 2048, 4096};
 
         var counter = 0;
         var random = new Random();
@@ -515,11 +522,12 @@ public static class Program
     }
 
     record OrQueries(string Id, int AverageResult, List<string> Terms);
+
     #endregion
 
 
-
     #region TermStatistics
+
     record TermFrequency(string Term, int Count);
 
     public static void GetMostSimpleStatisticsAboutTermStored()
@@ -617,7 +625,7 @@ public class DocumentStoreHolder
             },
 
             // Set conventions as necessary (optional)
-            Conventions = { MaxNumberOfRequestsPerSession = int.MaxValue, UseOptimisticConcurrency = true, },
+            Conventions = {MaxNumberOfRequestsPerSession = int.MaxValue, UseOptimisticConcurrency = true,},
 
             // Define a default database (optional)
             Database = "stackoverflow",
