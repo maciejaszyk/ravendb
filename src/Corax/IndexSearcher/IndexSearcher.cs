@@ -203,18 +203,15 @@ public sealed unsafe partial class IndexSearcher : IDisposable
         Debug.Assert(outputSize < 1024 * 1024, "Term size is too big for analyzer.");
         Debug.Assert(Unsafe.SizeOf<Token>() * tokenSize < 1024 * 1024, "Analyzer wants to create too much tokens.");
 
-        var buffer = Analyzer.BufferPool.Rent(outputSize);
-        var tokens = Analyzer.TokensPool.Rent(tokenSize);
-
-        Span<byte> bufferSpan = buffer.AsSpan();
-        Span<Token> tokensSpan = tokens.AsSpan();
-        analyzer.Execute(originalTerm, ref bufferSpan, ref tokensSpan);
-        Debug.Assert(tokensSpan.Length == 1, $"{nameof(ApplyAnalyzer)} should create only 1 token as a result.");
-        var disposable = Slice.From(Allocator, bufferSpan, ByteStringType.Immutable, out value);
-
-        Analyzer.TokensPool.Return(tokens);
-        Analyzer.BufferPool.Return(buffer);
-
+        var disposable = Allocator.AllocateDirect(outputSize, out var bufferScope);
+        using var _ = Allocator.AllocateDirect(tokenSize * sizeof(Token), out var tokensScope);
+        var buffer = bufferScope.ToSpan();
+        var tokens = new Span<Token>(tokensScope._pointer, tokenSize);
+        
+        analyzer.Execute(originalTerm, ref buffer, ref tokens);
+        Debug.Assert(tokens.Length == 1, $"{nameof(ApplyAnalyzer)} should create only 1 token as a result.");
+        
+        Slice.From(Allocator, buffer, ByteStringType.Immutable, out value);
         return disposable;
     }
 
