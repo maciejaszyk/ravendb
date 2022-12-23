@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Corax;
 using Corax.Mappings;
@@ -117,16 +118,16 @@ public class CoraxOrQueries : CoraxBooleanQueryBase
             foreach (var (field, terms) in _termMatchesList)
                 AddToQueryTree(IndexSearcher.InQuery(field, terms));
         }
-
-        if (ScoreFunction is not NullScoreFunction && ScoreFunction != null)
-            baseQuery = IndexSearcher.Boost(baseQuery, ScoreFunction);
         
         if (_complexMatches != null)
         {
             foreach (var complex in _complexMatches ?? Enumerable.Empty<IQueryMatch>())
                 AddToQueryTree(complex);
         }
-
+     
+        if (ScoreFunction is not NullScoreFunction && ScoreFunction != null)
+            baseQuery = IndexSearcher.Boost(baseQuery, ScoreFunction);
+        
         return baseQuery;
         
         void AddToQueryTree(IQueryMatch query)
