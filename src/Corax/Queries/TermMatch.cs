@@ -28,7 +28,7 @@ namespace Corax.Queries
         private long _numOfReturnedItems;
         private long _baselineIdx;
         private long _current;
-        private FrequencyHolder _frequencyHolder;
+        internal Bm25 _bm25;
         private Container.Item _container;
         private PostingList.Iterator _set;
         private ByteStringContext _ctx;
@@ -328,14 +328,14 @@ namespace Corax.Queries
                     long* dstPtr = inputStartPtr;
                     while (inputPtr < inputEndPtr)
                     {
-                        var result = term._set.Fill(blockMatches, out int read, pruneGreaterThanOptimization: buffer[matches - 1]);
+                        var result = term._set.Fill(blockMatches, out int read);//, pruneGreaterThanOptimization: buffer[matches - 1]); //todo: ask federico 'bout that 
+                        FrequencyUtils.RemoveFrequencies(blockMatches.Slice(0, read));
+                        MemoryExtensions.Sort(blockMatches.Slice(0, read));
+
                         if (result == false)
                             break;
-
-                        //Always discard freqs here
-                        FrequencyUtils.RemoveFrequencies(blockMatches.Slice(0, read));
-
-                        Debug.Assert(read < BlockSize);
+                        
+                        Debug.Assert(read <= BlockSize);
 
                         if (read == 0)
                             continue;
@@ -439,8 +439,8 @@ namespace Corax.Queries
 
                         inputPtr = isSmallerInput ? smallerPtr : largerPtr;
 
-                        Debug.Assert(inputPtr >= dstPtr);
-                        Debug.Assert((isSmallerInput ? largerPtr : smallerPtr) - blockStartPtr <= BlockSize);
+                        ////Debug.Assert(inputPtr >= dstPtr);
+                        ///Debug.Assert((isSmallerInput ? largerPtr : smallerPtr) - blockStartPtr <= BlockSize);
                     }
 
                     return (int)((ulong)dstPtr - (ulong)inputStartPtr) / sizeof(ulong);
@@ -516,7 +516,7 @@ namespace Corax.Queries
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             static void ScoreFunc(ref TermMatch term, Span<long> matches, Span<float> scores)
             {
-                Bm25.CalculateRelevance(term._frequencyHolder, Bm25.ComputeIdf(term._indexSearcher, 1), matches, scores);
+                term._bm25.Score(matches, scores);
             }
 
             static QueryInspectionNode InspectFunc(ref TermMatch term)
@@ -528,12 +528,12 @@ namespace Corax.Queries
                     });
             }
 
-            FrequencyHolder frequencyHolder = new(ctx, 1);
-            frequencyHolder.Add(value);
+            Bm25 bm25 = new(indexSearcher, 1, ctx, 1);
+            bm25.Add(value);
 
             return new TermMatch(indexSearcher, ctx, 1, &FillFunc, &AndWithFunc, scoreFunc: &ScoreFunc, inspectFunc: &InspectFunc)
             {
-                _indexSearcher = indexSearcher, _current = frequencyHolder.Matches[0], _currentIdx = QueryMatch.Start, _frequencyHolder = frequencyHolder
+                _indexSearcher = indexSearcher, _current = bm25.Matches[0], _currentIdx = QueryMatch.Start, _bm25 = bm25
             };
         }
 
@@ -561,7 +561,7 @@ namespace Corax.Queries
                 }
 
                 //Save the frequencies
-                term._frequencyHolder.Process(matches, i);
+                term._bm25.Process(matches, i);
 
                 return i;
             }
@@ -587,7 +587,7 @@ namespace Corax.Queries
                     current += ZigZagEncoding.Decode<long>(stream, out var len, currentIdx);
                     currentIdx += len;
                     itemsScanned++;
-                    decodedEntryId = term._frequencyHolder.Add(current);
+                    decodedEntryId = term._bm25.Add(current);
 
                     while (buffer[i] < decodedEntryId)
                     {
@@ -595,7 +595,7 @@ namespace Corax.Queries
                         if (i >= matches)
                         {
                             //no match, we should discard last item.
-                            term._frequencyHolder.Remove();
+                            term._bm25.Remove();
                             goto End;
                         }
                     }
@@ -614,7 +614,7 @@ namespace Corax.Queries
 
             static void ScoreFunc(ref TermMatch term, Span<long> matches, Span<float> scores)
             {
-                Bm25.CalculateRelevance(term._frequencyHolder, Bm25.ComputeIdf(term._indexSearcher, term.Count), matches, scores);
+                term._bm25.Score(matches, scores);
             }
 
             static QueryInspectionNode InspectFunc(ref TermMatch term)
@@ -630,7 +630,7 @@ namespace Corax.Queries
             return new TermMatch(indexSearcher, ctx, itemsCount, &FillFunc, &AndWithFunc, inspectFunc: &InspectFunc, scoreFunc: &ScoreFunc)
             {
                 _indexSearcher = indexSearcher,
-                _frequencyHolder = new(ctx, itemsCount),
+                _bm25 = new(indexSearcher, itemsCount, ctx, itemsCount),
                 _container = containerItem,
                 _currentIdx = len,
                 _baselineIdx = len,
@@ -653,7 +653,7 @@ namespace Corax.Queries
                     goto Fail;
 
                 // We update the current value we want to work with.
-                var current = term._frequencyHolder.Add(it.Current);
+                var current = term._bm25.Add(it.Current);
 
                 // Check if there are matches left to process or is any posibility of a match to be available in this block.
                 int i = 0;
@@ -681,7 +681,7 @@ namespace Corax.Queries
                     if (it.MoveNext() == false)
                         goto End;
 
-                    current = term._frequencyHolder.Add(it.Current);
+                    current = term._bm25.Add(it.Current);
                 }
 
                 End:
@@ -725,7 +725,7 @@ namespace Corax.Queries
                         if (result == false)
                             break;
 
-                        term._frequencyHolder.Process(blockMatches, read);
+                        term._bm25.Process(blockMatches, read);
 
                         Debug.Assert(read < BlockSize);
 
@@ -846,7 +846,7 @@ namespace Corax.Queries
                 var set = term._set;
 
                 set.Fill(matches, out i);
-                term._frequencyHolder.Process(matches, i);
+                term._bm25.Process(matches, i);
 
                 term._set = set;
                 return i;
@@ -863,7 +863,7 @@ namespace Corax.Queries
 
             static void ScoreFunc(ref TermMatch term, Span<long> matches, Span<float> scores)
             {
-                Bm25.CalculateRelevance(term._frequencyHolder, Bm25.ComputeIdf(term._indexSearcher, term.Count), matches, scores);
+                term._bm25.Score(matches, scores);
             }
             
             if (Avx2.IsSupported == false)
@@ -880,8 +880,7 @@ namespace Corax.Queries
                 _indexSearcher = indexSearcher, 
                 _set = postingList.Iterate(), 
                 _current = long.MinValue,
-                _frequencyHolder = new FrequencyHolder(ctx, (int)set.State.NumberOfEntries),
-                
+                _bm25 = new Bm25(indexSearcher, set.State.NumberOfEntries, ctx, (int)set.State.NumberOfEntries),
             };
         }
 
