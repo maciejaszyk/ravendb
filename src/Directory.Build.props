@@ -7,7 +7,8 @@
     <PackageIcon>icon.png</PackageIcon>
     <PackageProjectUrl>https://ravendb.net</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
-
+    <EnablePreviewFeatures>True</EnablePreviewFeatures>
+    <GenerateRequiresPreviewFeaturesAttribute>True</GenerateRequiresPreviewFeaturesAttribute>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/ravendb/ravendb</RepositoryUrl>
 

@@ -10,6 +10,7 @@
     <PackageTags>ravendb;client;database;nosql;doc db</PackageTags>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <CodeAnalysisRuleSet>..\..\RavenDB.ruleset</CodeAnalysisRuleSet>
+    <GenerateRequiresPreviewFeaturesAttribute>False</GenerateRequiresPreviewFeaturesAttribute>
   </PropertyGroup>
   
   <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
