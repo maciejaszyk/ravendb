@@ -625,5 +625,91 @@ select new
             var merger = new IndexMerger(dictionary);
             return merger.ProposeIndexMergeSuggestions();
         }
+        
+        
+        // index with load docs
+        private class AdditionalData
+        {
+            public string Id { get; set; }
+            public string Name { get; set; }
+        }
+
+        private class Dto
+        {
+            public string Name { get; set; }
+            public string AdditionalDataId { get; set; }
+            public string SecondDataId { get; set; }
+
+        }
+
+        private class FirstIndexWithLoad : AbstractIndexCreationTask<Dto>
+        {
+            public FirstIndexWithLoad()
+            {
+                Map = dtos => from doc in dtos
+                    let addDoc = LoadDocument<AdditionalData>(doc.AdditionalDataId)
+                    select new {First = addDoc.Name};
+            }
+        }
+        
+        private class SecondIndexWithLoad : AbstractIndexCreationTask<Dto>
+        {
+            public SecondIndexWithLoad()
+            {
+                Map = dtos => from doc in dtos
+                    let addDoc = LoadDocument<AdditionalData>(doc.SecondDataId)
+                    select new {SecondData = addDoc.Name};
+            }
+        }
+
+        [Fact]
+        public void CantMergeIndexesWithLoadMadeInSelectClause()
+        {
+            using var store = GetDocumentStore();
+            using (var session = store.OpenSession())
+            {
+                var additional = new AdditionalData() {Name = "maciej"};
+                session.Store(additional);
+                session.Store(new Dto(){AdditionalDataId = additional.Id, SecondDataId = additional.Id, Name = "matt"});
+                session.SaveChanges();
+            }
+            
+            var first = new FirstIndexWithLoad();
+            first.Execute(store);
+            var second = new SecondIndexWithLoad();
+            second.Execute(store);
+            
+            var firstIndexWithLoadDefinition = store
+                .Maintenance
+                .Send(new GetIndexOperation(first.IndexName));
+            var secondIndexWithLoadDefinition = store
+                .Maintenance
+                .Send(new GetIndexOperation(second.IndexName));
+            var dictionary = new Dictionary<string, IndexDefinition>
+            {
+                {first.IndexName, firstIndexWithLoadDefinition},
+                {second.IndexName, secondIndexWithLoadDefinition}
+            };
+            var merger = new IndexMerger(dictionary);
+            Assert.Equal(0, merger.ProposeIndexMergeSuggestions().Suggestions.Count);
+            Assert.Equal(2, merger.ProposeIndexMergeSuggestions().Unmergables.Count);
+        }
+
+        [Fact]
+        public void WillScanProperlyWhenFieldContainsWhereInLinq()
+        {
+            var index1 = new IndexDefinition
+            {
+                Name = "OrdersA",
+                Maps = { @"from order in docs.Orders
+select new
+{
+    order.Employee,
+    order.Company,
+    TotalSum = order.Day.Add(order.A + order.B)
+}" },
+                Type = IndexType.Map
+            };
+        }
     }
 }

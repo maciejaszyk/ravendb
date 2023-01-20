@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Raven.Client.Documents.Indexes;
-using Raven.Client.Documents.Session;
 
 namespace Raven.Server.Documents.Indexes.IndexMerging
 {
@@ -17,37 +15,36 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
 
         public IndexMerger(Dictionary<string, IndexDefinition> indexDefinitions)
         {
+            // IndexMerger operates only on static indexes. Auto indexes are merged automatically.
             _indexDefinitions = indexDefinitions
-                .Where(i => i.Value.Type.IsAuto() == false)
+                .Where(i => i.Value.Type.IsAuto() == false && i.Value.Type.IsJavaScript() == false)
                 .ToDictionary(i => i.Key, i=> i.Value);
         }
 
+        public IndexMergeResults ProposeIndexMergeSuggestions()
+        {
+            var indexes = GetIndexData();
+            var mergedIndexesData = MergeIndexes(indexes);
+            var mergedResults = CreateMergeIndexDefinition(mergedIndexesData);
+            return mergedResults;
+        }
+        
         private List<MergeProposal> MergeIndexes(List<IndexData> indexes)
         {
             var mergedIndexesData = new List<MergeProposal>();
-            foreach (var indexData in indexes.Where(indexData => !indexData.IsAlreadyMerged))
+            foreach (var indexData in indexes.Where(indexData => indexData.IsSuitedForMerge && indexData.IsAlreadyMerged == false))
             {
                 indexData.IsAlreadyMerged = true;
-                var mergeData = new MergeProposal();
-
-                List<string> failComments = CheckForUnsuitableIndexForMerging(indexData);
-
-                if (failComments.Count != 0)
-                {
-                    indexData.Comment = string.Join(Environment.NewLine, failComments);
-                    indexData.IsSuitedForMerge = false;
-                    mergeData.MergedData = indexData;
-                    mergedIndexesData.Add(mergeData);
+                if (IndexMergerHelper.IndexCanBeMerged(indexData, mergedIndexesData) == false)
                     continue;
-                }
-
+                
+                var mergeData = new MergeProposal();
                 mergeData.ProposedForMerge.Add(indexData);
 
                 foreach (IndexData current in indexes) // Note, we have O(N**2) here, known and understood
                 {
-                    if (current.IsMapReduceOrMultiMap)
-                        continue;
-                    if (mergeData.ProposedForMerge.All(other => CanMergeIndexes(other, current)) == false)
+                    
+                    if (mergeData.ProposedForMerge.All(other => IndexMergerHelper.CanMergeIndexes(other, current)) == false)
                         continue;
 
                     if (AreSelectClausesCompatible(current, indexData) == false)
@@ -62,54 +59,10 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
 
             return mergedIndexesData;
         }
+        
 
-        private static List<string> CheckForUnsuitableIndexForMerging(IndexData indexData)
-        {
-            var failComments = new List<string>();
-            if (indexData.Index.Type == IndexType.MapReduce)
-            {
-                failComments.Add("Cannot merge map/reduce indexes");
-            }
-
-            if (indexData.Index.Maps.Count > 1)
-            {
-                failComments.Add("Cannot merge multi map indexes");
-            }
-
-            if (indexData.NumberOfFromClauses > 1)
-            {
-                failComments.Add("Cannot merge indexes that have more than a single from clause");
-            }
-
-            if (indexData.NumberOfSelectClauses > 1)
-            {
-                failComments.Add("Cannot merge indexes that have more than a single select clause");
-            }
-
-            if (indexData.HasWhere)
-            {
-                failComments.Add("Cannot merge indexes that have a where clause");
-            }
-
-            if (indexData.HasGroup)
-            {
-                failComments.Add("Cannot merge indexes that have a group by clause");
-            }
-
-            if (indexData.HasLet)
-            {
-                failComments.Add("Cannot merge indexes that are using a let clause");
-            }
-
-            if (indexData.HasOrder)
-            {
-                failComments.Add("Cannot merge indexes that have an order by clause");
-            }
-
-            return failComments;
-        }
-
-        private List<IndexData> ParseIndexesAndGetReadyToMerge()
+        // Get index data. This will gather all fields etc into IndexData
+        private List<IndexData> GetIndexData()
         {
             var indexes = new List<IndexData>();
 
@@ -133,126 +86,80 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
 
             return indexes;
         }
-
-        private bool CanMergeIndexes(IndexData other, IndexData current)
+        
+        // We've to check if our index selects accept conditions:
+        // 1. Same amount select expression in both indexes.
+        // 2. No name conflicts
+        // 3. When field exists in both indexes we've to check if we store there the same value.
+        private static bool AreSelectClausesCompatible(IndexData firstIndex, IndexData secondIndex)
         {
-            if (current.Collection != other.Collection)
-                return false;
-            
-            if (current.IndexName == other.IndexName)
+            if (firstIndex.SelectExpressions.Count != secondIndex.SelectExpressions.Count)
                 return false;
 
-            if (current.NumberOfFromClauses > 1)
-                return false;
+            var selectClausesCount = firstIndex.SelectExpressions.Count;
 
-            if (current.NumberOfSelectClauses > 1)
-                return false;
-
-            if (current.HasWhere)
-                return false;
-
-            if (current.HasGroup)
-                return false;
-            if (current.HasOrder)
-                return false;
-            if (current.HasLet)
-                return false;
-
-            var currentFromExpression = current.FromExpression as MemberAccessExpressionSyntax;
-            var otherFromExpression = other.FromExpression as MemberAccessExpressionSyntax;
-
-            if (currentFromExpression != null || otherFromExpression != null)
+            // Select at 0 index is our projection clause.
+            for (var selectClauseIdx = 0; selectClauseIdx < selectClausesCount; ++selectClauseIdx)
             {
-                if (currentFromExpression == null || otherFromExpression == null)
-                    return false;
+                var firstIndexSelectClauseFields = firstIndex.SelectExpressions[selectClauseIdx];
+                var secondIndexSelectClauseFields = secondIndex.SelectExpressions[selectClauseIdx];
 
-                if (currentFromExpression.Name.Identifier.ValueText != otherFromExpression.Name.Identifier.ValueText)
-                    return false;
-            }
-
-            return CompareIndexFieldOptions(other, current);
-        }
-
-        private bool CompareIndexFieldOptions(IndexData index1Data, IndexData index2Data)
-        {
-            var intersectNames = index2Data.SelectExpressions.Keys.Intersect(index1Data.SelectExpressions.Keys).ToArray();
-            return DataDictionaryCompare(index1Data.Index.Fields, index2Data.Index.Fields, intersectNames);
-        }
-
-        private static bool DataDictionaryCompare<T>(IDictionary<string, T> dataDict1, IDictionary<string, T> dataDict2, IEnumerable<string> names)
-        {
-            bool found1, found2;
-
-            foreach (string kvp in names)
-            {
-                found1 = dataDict1.TryGetValue(kvp, out T v1);
-                found2 = dataDict2.TryGetValue(kvp, out T v2);
-
-                if (found1 && found2 && Equals(v1, v2) == false)
-                    return false;
-
-                // exists only in 1 - check if contains default value
-                if (found1 && !found2)
-                    return false;
-
-                if (found2 && !found1)
-                    return false;
-            }
-
-            return true;
-        }
-
-        private static void DataDictionaryMerge<TKey, TVal>(IDictionary<TKey, TVal> dest, IDictionary<TKey, TVal> src)
-        {
-            foreach (var val in src)
-            {
-                dest[val.Key] = val.Value;
-            }
-        }
-
-        private static bool AreSelectClausesCompatible(IndexData x, IndexData y)
-        {
-            foreach (var pair in x.SelectExpressions)
-            {
-                if (y.SelectExpressions.TryGetValue(pair.Key, out ExpressionSyntax expressionValue) == false)
-                    continue;
-                // for the same key, they have to be the same
-                var ySelectExpr = ExtractValueFromExpression(expressionValue);
-                var xSelectExpr = ExtractValueFromExpression(pair.Value);
-                if (xSelectExpr != ySelectExpr)
+                foreach (var fieldData in firstIndexSelectClauseFields.SelectExpressions)
                 {
-                    return false;
+                    
+                    if (secondIndexSelectClauseFields.SelectExpressions.TryGetValue(fieldData.Key, out ExpressionSyntax expressionFromSecondIndex) == false)
+                        continue; //Field doesn't exists in another index. This is good because there is no conflict.
+
+                    //We've to take into account that identifier from higher lvl can be different. 
+                    var firstSelectExpr = ExtractValueFromExpression(fieldData.Value);
+                    var secondSelectExpr = ExtractValueFromExpression(expressionFromSecondIndex);
+                    
+                    // for the same key, they have to be the same
+                    if (firstSelectExpr != secondSelectExpr)
+                        return false;
+
                 }
             }
-
+         
             return true;
         }
 
-        private static bool AreSelectClausesTheSame(IndexData index, Dictionary<string, ExpressionSyntax> selectExpressionDict)
+        // We want to check if one index is a subset of another.
+        private static bool AreSelectClausesTheSame(IndexData index, Dictionary<int, SelectClause> selectsFromOther)
         {
             // We want to delete an index when that index is a subset of another.
-            if (index.SelectExpressions.Count < selectExpressionDict.Count)
+            if (index.SelectExpressions.Count != selectsFromOther.Count)
                  return false;
 
-            foreach (var pair in index.SelectExpressions)
+            var count = selectsFromOther.Count;
+            
+            for (int selectIdx = 0; selectIdx < count; ++selectIdx)
             {
-                if (selectExpressionDict.TryGetValue(pair.Key, out ExpressionSyntax expressionValue) == false)
-                    return false;
+                var currentDocIdentifier = count == 1 ? "doc" : $"this{count - selectIdx}";
+                var selectExpressionDict = selectsFromOther[selectIdx].SelectExpressions;
                 
-                // for the same key, they have to be the same
-                var ySelectExpr = TransformAndExtractValueFromExpression(expressionValue);
-                var xSelectExpr = TransformAndExtractValueFromExpression(pair.Value);
-                if (xSelectExpr != ySelectExpr)
+                
+                
+                var selectExpressionFromCurrent = index.SelectExpressions[selectIdx].SelectExpressions;
+                foreach (var pair in selectExpressionFromCurrent)
                 {
-                    return false;
+                    if (selectExpressionDict.TryGetValue(pair.Key, out ExpressionSyntax expressionValue) == false)
+                        return false;
+                    
+                    var ySelectExpr = TransformAndExtractValueFromExpression(expressionValue, currentDocIdentifier, selectsFromOther[selectIdx]);
+                    var xSelectExpr = TransformAndExtractValueFromExpression(pair.Value, currentDocIdentifier, index.SelectExpressions[selectIdx]);
+                    if (xSelectExpr != ySelectExpr)
+                    {
+                        return false;
+                    }
                 }
             }
-
+            
             return true;
 
-            string TransformAndExtractValueFromExpression(ExpressionSyntax expr) => expr switch
+            string TransformAndExtractValueFromExpression(ExpressionSyntax expr, string currentDocIdentifier, SelectClause selectClause) => expr switch
             {
-                InvocationExpressionSyntax ies => RecursivelyTransformInvocationExpressionSyntax(index, ies, out var _).ToString(),
+                InvocationExpressionSyntax ies => RecursivelyTransformInvocationExpressionSyntax(index, ies, currentDocIdentifier, selectClause, out var _).ToString(),
                 _ => ExtractValueFromExpression(expr)
             };
         }
@@ -372,13 +279,14 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
                 }
 
                 mergeSuggestion.CanMerge.Add(curProposedData.IndexName);
-                DataDictionaryMerge(mergeSuggestion.MergedIndex.Fields, curProposedData.Index.Fields);
+                IndexMergerHelper.DataDictionaryMerge(mergeSuggestion.MergedIndex.Fields, curProposedData.Index.Fields);
             }
 
             return true;
         }
 
-        private static InvocationExpressionSyntax RecursivelyTransformInvocationExpressionSyntax(IndexData curProposedData, InvocationExpressionSyntax ies, out string message)
+        private static InvocationExpressionSyntax RecursivelyTransformInvocationExpressionSyntax(IndexData curProposedData, InvocationExpressionSyntax ies,
+            string newIdentifier, SelectClause selectClause, out string message)
         {
             message = null;
             if (RuntimeHelpers.TryEnsureSufficientExecutionStack() == false)
@@ -390,7 +298,7 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
             List<ArgumentSyntax> rewrittenArguments = new();
             foreach (var argument in ies.ArgumentList.Arguments)
             {
-                ExpressionSyntax result = RewriteExpressionSyntax(curProposedData, argument.Expression, out message);
+                ExpressionSyntax result = RewriteExpressionSyntax(curProposedData, argument.Expression, selectClause, newIdentifier, out message);
 
                 if (result == null)
                 {
@@ -401,15 +309,14 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
                 rewrittenArguments.Add(SyntaxFactory.Argument(result));
             }
 
-            ExpressionSyntax invocationExpression = ChangeParentInMemberSyntaxToDoc(ies.Expression as MemberAccessExpressionSyntax) ?? ies.Expression;
+            ExpressionSyntax invocationExpression = ChangeParentInMemberSyntaxToNewIdentifier(ies.Expression as MemberAccessExpressionSyntax, newIdentifier) ?? ies.Expression;
 
             return SyntaxFactory.InvocationExpression(invocationExpression,
                 SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList<ArgumentSyntax>(rewrittenArguments)));
             
-            
         }
 
-        private static ExpressionSyntax RewriteExpressionSyntax(IndexData indexData, ExpressionSyntax originalExpression, out string message)
+        private static ExpressionSyntax RewriteExpressionSyntax(IndexData indexData, ExpressionSyntax originalExpression, SelectClause selectClause, string newIdentifier, out string message)
         {
             if (RuntimeHelpers.TryEnsureSufficientExecutionStack() == false)
             {
@@ -419,8 +326,8 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
             message = null;
             return originalExpression switch
             {
-                MemberAccessExpressionSyntax maes => ChangeParentInMemberSyntaxToDoc(maes),
-                InvocationExpressionSyntax iesInner => RecursivelyTransformInvocationExpressionSyntax(indexData, iesInner, out message),
+                MemberAccessExpressionSyntax maes => ChangeParentInMemberSyntaxToNewIdentifier(maes, newIdentifier),
+                InvocationExpressionSyntax iesInner => RecursivelyTransformInvocationExpressionSyntax(indexData, iesInner, newIdentifier, selectClause, out message),
                 SimpleLambdaExpressionSyntax =>  originalExpression,
                 IdentifierNameSyntax ins => ChangeIdentifierToIndexMergerDefaultWhenNeeded(ins), 
                 BinaryExpressionSyntax bes => RewriteBinaryExpression(indexData, bes), 
@@ -429,8 +336,8 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
             
             IdentifierNameSyntax ChangeIdentifierToIndexMergerDefaultWhenNeeded(IdentifierNameSyntax original)
             {
-                if (original.ToFullString() == indexData.FromIdentifier)
-                    return SyntaxFactory.IdentifierName("doc");
+                if (original.ToFullString() == selectClause.FromIdentifier)
+                    return SyntaxFactory.IdentifierName(newIdentifier);
 
                 return original;
             }
@@ -444,7 +351,7 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
             return SyntaxFactory.BinaryExpression(original.Kind(), leftSide, original.OperatorToken, rightSide);
         }
         
-        private static MemberAccessExpressionSyntax ChangeParentInMemberSyntaxToDoc(MemberAccessExpressionSyntax memberAccessExpression)
+        private static MemberAccessExpressionSyntax ChangeParentInMemberSyntaxToNewIdentifier(MemberAccessExpressionSyntax memberAccessExpression, string newIdentifier)
         {
             if (memberAccessExpression?.Expression is MemberAccessExpressionSyntax)
             {
@@ -452,21 +359,19 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
                 var valueExp = SyntaxFactory.ParseExpression(valueStr).NormalizeWhitespace();
                 var innerName = ExtractIdentifierFromExpression(valueExp as MemberAccessExpressionSyntax);
                 var innerMember = SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression,
-                    SyntaxFactory.IdentifierName("doc"), SyntaxFactory.IdentifierName(innerName));
+                    SyntaxFactory.IdentifierName(newIdentifier), SyntaxFactory.IdentifierName(innerName));
                 return SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, innerMember, memberAccessExpression.Name);
             }
 
             if (memberAccessExpression?.Expression is SimpleNameSyntax)
             {
-                return SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, SyntaxFactory.IdentifierName("doc"),
+                return SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, SyntaxFactory.IdentifierName(newIdentifier),
                     memberAccessExpression.Name);
             }
-
 
             return null;
         }
 
-        
         private static IndexMergeResults ExcludePartialResults(IndexMergeResults originalIndexes)
         {
             var resultingIndexMerge = new IndexMergeResults();
@@ -538,14 +443,6 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
 
             var identifier = node as IdentifierNameSyntax;
             return identifier?.Identifier.ValueText;
-        }
-
-        public IndexMergeResults ProposeIndexMergeSuggestions()
-        {
-            var indexes = ParseIndexesAndGetReadyToMerge();
-            var mergedIndexesData = MergeIndexes(indexes);
-            var mergedResults = CreateMergeIndexDefinition(mergedIndexesData);
-            return mergedResults;
         }
     }
 }

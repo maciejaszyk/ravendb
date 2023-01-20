@@ -11,7 +11,7 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
         private readonly HashSet<string> _fieldNames;
         private readonly Dictionary<string, ExpressionSyntax> _selectExpressions;
         private bool _queryProcessed;
-
+        public AnonymousObjectCreationExpressionSyntax MainCreationObject;
         public CaptureSelectExpressionsAndNewFieldNamesVisitor(bool outerMostRequired, HashSet<string> fieldNames, Dictionary<string, ExpressionSyntax> selectExpressions)
         {
             _outerMostRequired = outerMostRequired;
@@ -25,6 +25,8 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
             if (_queryProcessed && _outerMostRequired)
                 return node;
 
+
+            MainCreationObject = node;
             _fieldNames.Clear();
             _selectExpressions.Clear();
 

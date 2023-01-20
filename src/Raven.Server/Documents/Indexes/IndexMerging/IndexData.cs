@@ -7,10 +7,19 @@ using Raven.Client.Documents.Indexes;
 
 namespace Raven.Server.Documents.Indexes.IndexMerging
 {
+    internal class SelectClause
+    {
+        public Dictionary<string, ExpressionSyntax> SelectExpressions = new Dictionary<string, ExpressionSyntax>();
+        public ExpressionSyntax FromExpression { get; set; }
+        public string FromIdentifier { get; set; }
+    }
+    
     internal class IndexData
     {
         private readonly IndexDefinition _index;
-        public Dictionary<string, ExpressionSyntax> SelectExpressions = new Dictionary<string, ExpressionSyntax>();
+
+        public Dictionary<int, SelectClause> SelectExpressions = new();
+        
         public IndexData(IndexDefinition index)
         {
             _index = index;
@@ -86,7 +95,7 @@ namespace Raven.Server.Documents.Indexes.IndexMerging
             
             return resultMapOfMerging;
         }
-
+        
         public override string ToString()
         {
             return string.Format("IndexName: {0}", IndexName);
