@@ -22,6 +22,7 @@ using Sparrow;
 using Sparrow.Json;
 using Sparrow.Server;
 using Spatial4n.Shapes;
+using Voron;
 using Constants = Raven.Client.Constants;
 using Index = Raven.Server.Documents.Indexes.Index;
 
@@ -539,7 +540,7 @@ public static class QueryBuilderHelper
         if (isForQuery == false)
         {
             if (fieldName is "score" or "score()")
-                return FieldMetadata.Build(default, default, default, default);
+                return FieldMetadata.Build(default(Slice), default, default, default, default);
         }
 
         var shouldTurnOffAnalyzersForTime = index.IndexFieldsPersistence.HasTimeValues(fieldName) && isSorting == false;
