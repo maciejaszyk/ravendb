@@ -516,13 +516,14 @@ public static class QueryBuilderHelper
         if (fieldName is "score()")
             return FieldMetadata.Build(allocator, fieldName, -1, FieldIndexingMode.Normal, null);
 
-        
-        
-        return GetFieldMetadata(allocator, fieldName, index, indexMapping, queryMapping, hasDynamics, dynamicFields, isForQuery, isSorting: true);
+
+
+        return GetFieldMetadata(allocator, fieldName, index, indexMapping, queryMapping, hasDynamics, dynamicFields, isForQuery: isForQuery, isSorting: true);
     }
 
-    internal static FieldMetadata GetFieldMetadata(ByteStringContext allocator, string fieldName, Index index, IndexFieldsMapping indexMapping, FieldsToFetch queryMapping, bool hasDynamics, Lazy<List<string>> dynamicFields, bool isForQuery = true,
-        bool exact = false, bool isSorting = false)
+    internal static FieldMetadata GetFieldMetadata(ByteStringContext allocator, string fieldName, Index index, IndexFieldsMapping indexMapping,
+        FieldsToFetch queryMapping, bool hasDynamics, Lazy<List<string>> dynamicFields, bool isForQuery = true,
+        bool exact = false, bool isSorting = false, bool hasBoost = false)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
 
@@ -531,8 +532,8 @@ public static class QueryBuilderHelper
         {
             var metadata = indexMapping.GetByFieldId(0).Metadata;
             return exact 
-                ? FieldMetadata.Build(metadata.FieldName, 0, FieldIndexingMode.Exact, null) 
-                : metadata;
+                ? metadata.ChangeAnalyzer(FieldIndexingMode.Exact, null).ChangeScoringMode(hasBoost)
+                : metadata.ChangeScoringMode(hasBoost);
         }
         
         if (isForQuery == false)
@@ -546,8 +547,8 @@ public static class QueryBuilderHelper
         if (indexMapping.TryGetByFieldName(allocator, fieldName, out var indexFinding))
         {
             return exact || shouldTurnOffAnalyzersForTime
-                ? indexFinding.Metadata.ChangeAnalyzer(FieldIndexingMode.Exact) 
-                : indexFinding.Metadata;
+                ? indexFinding.Metadata.ChangeAnalyzer(FieldIndexingMode.Exact).ChangeScoringMode(hasBoost)
+                : indexFinding.Metadata.ChangeScoringMode(hasBoost);
         }
         else
         {
@@ -557,7 +558,7 @@ public static class QueryBuilderHelper
             var mode = shouldTurnOffAnalyzersForTime || exact 
                 ? FieldIndexingMode.Exact 
                 : FieldIndexingMode.Normal;
-            return FieldMetadata.Build(allocator, fieldName, Corax.Constants.IndexWriter.DynamicField, mode, indexMapping.DefaultAnalyzer);
+            return FieldMetadata.Build(allocator, fieldName, Corax.Constants.IndexWriter.DynamicField, mode, indexMapping.DefaultAnalyzer, hasBoost: hasBoost);
         }
 
         void ThrowNotFoundInIndex() => throw new InvalidQueryException($"Field {fieldName} not found in Index '{index.Name}'.");
