@@ -196,12 +196,13 @@ namespace Corax.Queries
 
             // Initialize the important infrastructure for the sorting.
             TFetcher fetcher = default;
+            var termReader = match._searcher.TermsReaderFor(match._comparer.Field.FieldName);
             // We will allocate the space for the heap data structure that we are gonna use to fill the results.
             int sizeOfElement = Unsafe.SizeOf<MatchComparer<TComparer, TOut>.Item>();
             int heapSize = sizeOfElement * totalMatches;
             if (match._bufferSize < heapSize)
                 match.UnlikelyGrowBuffer(heapSize);
-            var heap = new SortingMatchHeap<TComparer, TOut>(match._comparer, match._buffer, totalMatches);
+            var heap = new SortingMatchHeap<TComparer, TOut>(match._comparer, match._buffer, totalMatches, termReader);
             while (true)
             {
                 var read = match._inner.Fill(matches);
@@ -266,8 +267,12 @@ namespace Corax.Queries
                     }
                     else
                     {
-                        if (fetcher.Get(match._searcher, match._comparer.Field, cur.Key, out cur.Value, match._comparer) == false)
-                            cur.Key = -cur.Key;
+                        // TODO: restore
+                        //if (typeof(TOut) != typeof(SequenceItem))
+                        {
+                            if (fetcher.Get(match._searcher, match._comparer.Field, cur.Key, out cur.Value, match._comparer) == false)
+                                cur.Key = -cur.Key;
+                        }
                     }
                     
                     heap.Add(cur);

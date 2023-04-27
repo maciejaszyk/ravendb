@@ -19,11 +19,11 @@ public unsafe ref struct SortingMatchHeap<TComparer, TOut>
 
     public MatchComparer<TComparer, TOut>.Item[] Items => new Span<MatchComparer<TComparer, TOut>.Item>(_items, Count).ToArray();
 
-    public SortingMatchHeap(TComparer comparer, byte* buffer, int totalMatches)
+    public SortingMatchHeap(TComparer comparer, byte* buffer, int totalMatches, TermsReader termsReader)
     {
         _items = buffer;
         _totalMatches = totalMatches;
-        _comparer = new MatchComparer<TComparer, TOut>(comparer);
+        _comparer = new MatchComparer<TComparer, TOut>(comparer, termsReader);
         Count = 0;
     }
 
@@ -62,7 +62,7 @@ public unsafe ref struct SortingMatchHeap<TComparer, TOut>
         Debug.Assert(Count <= matches.Length);
         ref var itemsStart = ref Unsafe.AsRef<MatchComparer<TComparer,TOut>.Item>(_items);
         int resultsCount = Count;
-        ref long dest = ref Unsafe.Add(ref matches[0], Count- 1);
+        ref long dest = ref matches[0];
         while (resultsCount > 0)
         {
             // in case when value doesn't exist in entry we set entryId as -entryId in `Item`, let's revert that.
@@ -73,7 +73,7 @@ public unsafe ref struct SortingMatchHeap<TComparer, TOut>
             HeapDown(ref itemsStart, resultsCount);
             // now we are never using it, we can overwrite 
             dest = actualKey;
-            dest = ref Unsafe.Subtract(ref dest, 1);
+            dest = ref Unsafe.Add(ref dest, 1);
         }
     }
 
