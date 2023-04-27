@@ -52,6 +52,7 @@ public unsafe ref struct SortingMatchHeap<TComparer, TOut>
         }
         else if (_comparer.Compare(itemsRef, cur) > 0)
         {
+            // In case when it's 
             itemsRef = cur;
             HeapDown(ref itemsRef, Count);
         }

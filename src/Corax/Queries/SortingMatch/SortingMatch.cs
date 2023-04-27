@@ -267,6 +267,9 @@ namespace Corax.Queries
                     }
                     else
                     {
+                        
+                        
+                        
                         // TODO: restore
                         //if (typeof(TOut) != typeof(SequenceItem))
                         {

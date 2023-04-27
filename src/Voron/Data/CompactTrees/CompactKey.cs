@@ -149,7 +149,8 @@ public unsafe class CompactKey : IDisposable
     [SkipLocalsInit]
     private void DecodeFromEncodedForm()
     {
-        Debug.Assert(IsValid, "At this stage we either created the key using an unencoded version OR we have already pushed 1 encoded key. Current dictionary cannot be invalid.");
+        Debug.Assert(IsValid,
+            "At this stage we either created the key using an unencoded version OR we have already pushed 1 encoded key. Current dictionary cannot be invalid.");
 
         long currentDictionary = Dictionary;
         int currentKeyIdx = _currentKeyIdx;
@@ -453,6 +454,11 @@ public unsafe class CompactKey : IDisposable
         var thisDecoded = this.Decoded();
         var valueDecoded = value.Decoded();
         return thisDecoded.SequenceCompareTo(valueDecoded);
+    }
+
+    public bool TryCopyTo(Span<byte> buffer)
+    {
+        Decoded().CopyTo(buffer);
     }
 
     public override string ToString()

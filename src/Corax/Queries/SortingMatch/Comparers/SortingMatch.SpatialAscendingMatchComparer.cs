@@ -15,7 +15,6 @@ unsafe partial struct SortingMatch
     {
         private readonly IndexSearcher _searcher;
         private readonly FieldMetadata _field;
-        private readonly delegate*<ref SpatialAscendingMatchComparer, long, long, int> _compareFunc;
         private readonly MatchCompareFieldType _fieldType;
         private readonly IPoint _point;
         private readonly double _round;
@@ -64,15 +63,6 @@ unsafe partial struct SortingMatch
 
                 return -1;
             }
-            
-            _compareFunc = _fieldType switch
-            {
-                MatchCompareFieldType.Sequence => &ThrowOnWrongEntryFieldType,
-                MatchCompareFieldType.Integer => &ThrowOnWrongEntryFieldType,
-                MatchCompareFieldType.Floating => &ThrowOnWrongEntryFieldType,
-                MatchCompareFieldType.Spatial => &CompareWithSpatialLoad<double>,
-                var type => throw new NotSupportedException($"Currently, we do not support sorting by {type}.")
-            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

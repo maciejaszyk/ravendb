@@ -1,4 +1,8 @@
 using System;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using Corax.Queries;
+using NetTopologySuite.Utilities;
 using Sparrow.Server;
 using Voron;
 using Voron.Data.BTrees;
@@ -22,6 +26,32 @@ public readonly unsafe struct TermsReader : IDisposable
         _xKeyScope = new CompactKeyCacheScope(_llt);
         _yKeyScope = new CompactKeyCacheScope(_llt);
     }
+
+    public bool TryGetTermFor(long id, ref Span<byte> buffer)
+    {
+        using var _ = _fst.Read(id, out var termId);
+        if (termId.HasValue == false)
+            goto Failed;
+        
+        long termContainerId = termId.ReadInt64();
+        var item = Container.Get(_llt, termContainerId);
+        int remainderBits = item.Address[0] >> 4;
+        int encodedKeyLengthInBits = (item.Length - 1) * 8 - remainderBits;
+
+        _xKeyScope.Key.Set(encodedKeyLengthInBits, item.ToSpan()[1..], item.PageLevelMetadata);
+        var key = _xKeyScope.Key.Decoded();
+
+        if (buffer.Length < key.Length)
+            goto Failed;
+        
+        key.CopyTo(buffer);
+        buffer = buffer.Slice(0, key.Length);
+        return true;
+        
+        Failed:
+        buffer = Span<byte>.Empty;
+        return false;
+    }
     
     public bool TryGetTermFor(long id, out string term)
     {
@@ -42,6 +72,78 @@ public readonly unsafe struct TermsReader : IDisposable
         return true;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetTermFor(long id, out long value) => TryGetTermForNumeric(id, out value);
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetTermFor(long id, out double value) => TryGetTermForNumeric(id, out value);
+    
+    private bool TryGetTermForNumeric<TValue>(long id, out TValue term) where TValue : unmanaged
+    {
+        var value = _fst.ReadPtr(id, out var len);
+
+        if (value == null)
+        {
+            Unsafe.SkipInit(out term);
+            return false;
+        }
+        
+        Debug.Assert(sizeof(TValue) == len);
+
+        term = *(TValue*)value;
+        return true;
+    }
+
+    private bool TryGetTermAsCoordinatesFor(long id, out (float lat, float lon) coordinates)
+    {
+        var value = _fst.ReadPtr(id, out var len);
+
+        if (value == null)
+        {
+            Unsafe.SkipInit(out coordinates);
+            return false;
+        }
+        
+        Debug.Assert(len == sizeof(float)*2);
+
+        coordinates.lat = *(float*)value;
+        coordinates.lon = *(float*)(value + sizeof(float));
+        return true;
+    }
+
+    public int CompareAsNumeric<TNumeric>(long x, long y) where TNumeric : unmanaged
+    {
+        var xVal = _fst.ReadPtr(x, out var _);
+        var yVal = _fst.ReadPtr(y, out var _);
+
+        if (yVal == null)
+            return xVal == null ? 0 : 1;
+        if (xVal == null)
+            return -1;
+
+        if (typeof(TNumeric) == typeof(long))
+            return (*(long*)xVal).CompareTo(*(long*)yVal);
+
+        return (*(double*)xVal).CompareTo(*(double*)yVal);
+    }
+
+    public int Compare<TComparer>(long idX, long idY, TComparer comparer) where TComparer : IMatchComparer
+    {
+        // in case of special comparers we've to perform reading whole term.
+        var isSpecial = typeof(TComparer) == typeof(SortingMatch.AlphanumericAscendingMatchComparer) || typeof(TComparer) == typeof(SortingMatch.AlphanumericDescendingMatchComparer)
+            || typeof(TComparer) == typeof(SortingMatch.SpatialAscendingMatchComparer) || typeof(TComparer) == typeof(SortingMatch.SpatialDescendingMatchComparer);
+
+        if (isSpecial == false)
+        {
+            return comparer.FieldType switch
+            {
+                MatchCompareFieldType.Sequence => Compare(idX, idY),
+                MatchCompareFieldType.Alphanumeric => comparer.CompareSequence))
+            };
+        }
+
+    }
+    
     public int Compare(long x, long y)
     {
         using var _ = _fst.Read(x, out var ySlice);

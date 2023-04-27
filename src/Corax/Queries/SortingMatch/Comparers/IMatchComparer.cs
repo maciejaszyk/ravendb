@@ -25,6 +25,7 @@ namespace Corax.Queries
         FieldMetadata Field { get; }
 
         int CompareSequence(ReadOnlySpan<byte> sx, ReadOnlySpan<byte> sy);
+        
         int CompareNumerical<T>(T sx, T sy) where T : unmanaged, INumber<T>;
     }
 

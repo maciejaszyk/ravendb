@@ -39,41 +39,6 @@ unsafe partial struct SortingMatch
             _point = metadata.Point;
             _round = metadata.Round;
             _units = metadata.Units;
-            
-            static int ThrowOnWrongEntryFieldType(ref SpatialDescendingMatchComparer comparer, long x, long y)
-            {
-                throw new InvalidDataException($"{nameof(SpatialDescendingMatchComparer)} is only for spatial data.");
-            }
-            
-            static int CompareWithSpatialLoad<T>(ref SpatialDescendingMatchComparer comparer, long x, long y) where T : unmanaged
-            {
-                var readerX = comparer._searcher.GetEntryReaderFor(x);
-                var readX = readerX.GetFieldReaderFor(comparer._field).Read(out (double lat, double lon) resultX);
-
-                var readerY = comparer._searcher.GetEntryReaderFor(y);
-                var readY = readerY.GetFieldReaderFor(comparer._field).Read(out (double lat, double lon) resultY);
-
-                if (readX && readY)
-                {
-                    var readerXDistance = SpatialUtils.GetGeoDistance(in resultX, comparer);
-                    var readerYDistance = SpatialUtils.GetGeoDistance(in resultY, comparer);
-                    
-                    return comparer.CompareNumerical(readerXDistance, readerYDistance);
-                }
-                else if (readX)
-                    return -1;
-
-                return 1;
-            }
-
-            _compareFunc = _fieldType switch
-            {
-                MatchCompareFieldType.Sequence => &ThrowOnWrongEntryFieldType,
-                MatchCompareFieldType.Integer => &ThrowOnWrongEntryFieldType,
-                MatchCompareFieldType.Floating => &ThrowOnWrongEntryFieldType,
-                MatchCompareFieldType.Spatial => &CompareWithSpatialLoad<double>,
-                var type => throw new NotSupportedException($"Currently, we do not support sorting by {type}.")
-            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

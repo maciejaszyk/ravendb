@@ -61,7 +61,7 @@ public unsafe partial class IndexSearcher
         if (typeof(TComparer) == typeof(SortingMatch.DescendingMatchComparer))
         {
             return SortingMatch.Create(new SortingMatch<TInner, SortingMatch.DescendingMatchComparer>(this, set,
-                new SortingMatch.DescendingMatchComparer(this, orderMetadata), take));
+                new SortingMatch.DescendingMatchComparer(orderMetadata), take));
         }
 
         if (typeof(TComparer) == typeof(BoostingComparer))
@@ -71,12 +71,12 @@ public unsafe partial class IndexSearcher
 
         if (typeof(TComparer) == typeof(SortingMatch.AlphanumericAscendingMatchComparer))
         {
-            return SortingMatch.Create(new SortingMatch<TInner, SortingMatch.AlphanumericAscendingMatchComparer>(this, set, new SortingMatch.AlphanumericAscendingMatchComparer(this, orderMetadata), take));
+            return SortingMatch.Create(new SortingMatch<TInner, SortingMatch.AlphanumericAscendingMatchComparer>(this, set, new SortingMatch.AlphanumericAscendingMatchComparer(orderMetadata), take));
         }
 
         if (typeof(TComparer) == typeof(SortingMatch.AlphanumericDescendingMatchComparer))
         {
-            return SortingMatch.Create(new SortingMatch<TInner, SortingMatch.AlphanumericDescendingMatchComparer>(this, set, new SortingMatch.AlphanumericDescendingMatchComparer(this, orderMetadata), take));
+            return SortingMatch.Create(new SortingMatch<TInner, SortingMatch.AlphanumericDescendingMatchComparer>(this, set, new SortingMatch.AlphanumericDescendingMatchComparer(orderMetadata), take));
         }
         
         if (typeof(TComparer) == typeof(SortingMatch.CustomMatchComparer))
