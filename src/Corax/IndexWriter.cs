@@ -1645,7 +1645,7 @@ namespace Corax
                 }
                 else
                 {
-                    switch (AddEntriesToTerm(tmpBuf, existingIdInTree, ref entries, out termId))
+                    switch (AddEntriesToTerm(tmpBuf, existingIdInTree, ref entries, out termId, term))
                     {
                         case AddEntriesToTermResult.UpdateTermId:
                             if (termId != existingIdInTree)
@@ -1709,7 +1709,7 @@ namespace Corax
 
         /// <param name="idInTree">encoded</param>
         /// <param name="termId">encoded</param>
-        private AddEntriesToTermResult AddEntriesToTerm(Span<byte> tmpBuf, long idInTree, ref EntriesModifications entries, out long termId)
+        private AddEntriesToTermResult AddEntriesToTerm(Span<byte> tmpBuf, long idInTree, ref EntriesModifications entries, out long termId, Slice term)
         {
             if ((idInTree & (long)TermIdMask.PostingList) != 0)
             {
@@ -1719,7 +1719,7 @@ namespace Corax
             {
                 return AddEntriesToTermResultViaSmallPostingList(tmpBuf, ref entries, out termId, idInTree & Constants.StorageMask.ContainerType);
             }
-            return AddEntriesToTermResultSingleValue(tmpBuf, idInTree, ref entries, out termId);
+            return AddEntriesToTermResultSingleValue(tmpBuf, idInTree, ref entries, out termId, term);
         }
 
         private unsafe AddEntriesToTermResult AddEntriesToTermResultViaSmallPostingList(Span<byte> tmpBuf, ref EntriesModifications entries, out long termIdInTree, long idInTree)
@@ -1817,7 +1817,7 @@ namespace Corax
             return EntryIdEncodings.Encode(termIdInTree, 0, TermIdMask.SmallPostingList);
         }
 
-        private AddEntriesToTermResult AddEntriesToTermResultSingleValue(Span<byte> tmpBuf, long idInTree, ref EntriesModifications entries, out long termId)
+        private AddEntriesToTermResult AddEntriesToTermResultSingleValue(Span<byte> tmpBuf, long idInTree, ref EntriesModifications entries, out long termId, Slice term)
         {
             entries.AssertPreparationIsNotFinished();
             
@@ -1842,13 +1842,17 @@ namespace Corax
             
             if (entries.TotalAdditions == 0 && entries.TotalRemovals > 0) 
             {
-                if (entries.TotalRemovals > 1) 
+                if (entries.TotalRemovals > 1)
+                {
+                    
                     throw new InvalidOperationException($"More than one removal found for a single item, which is impossible. " +
                                                         $"{Environment.NewLine}Current tree id: {idInTree}" +
                                                         $"{Environment.NewLine}Current entry id {existingEntryId}" +
                                                         $"{Environment.NewLine}Current term frequency: {existingFrequency}" +
                                                         $"{Environment.NewLine}Items we wanted to delete (entryId|Frequency): " +
+                                                        $"{Environment.NewLine}{term}" +
                                                         $"{string.Join(", ", entries.Removals.ToArray().Zip(entries.RemovalsFrequency.ToArray()).Select(i => $"({i.First}|{i.Second})"))}");
+                }
                 
                 Debug.Assert(EntryIdEncodings.QuantizeAndDequantize(entries.RemovalsFrequency[0]) == existingFrequency, "The item stored and the item we're trying to delete are different, which is impossible.");
                 
@@ -1934,7 +1938,7 @@ namespace Corax
                     continue;
                 }
 
-                switch (AddEntriesToTerm(tmpBuf, existing, ref localEntry, out termId))
+                switch (AddEntriesToTerm(tmpBuf, existing, ref localEntry, out termId, default))
                 {
                     case AddEntriesToTermResult.UpdateTermId:
                         fieldTree.Add(term, termId);
@@ -2001,7 +2005,7 @@ namespace Corax
                     continue;
                 }
 
-                switch (AddEntriesToTerm(tmpBuf, existing, ref localEntry, out termId))
+                switch (AddEntriesToTerm(tmpBuf, existing, ref localEntry, out termId, default))
                 {
                     case AddEntriesToTermResult.UpdateTermId:
                         fieldTree.Add(termAsLong, termId);
