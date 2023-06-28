@@ -475,6 +475,18 @@ namespace Raven.Server.Config.Categories
         [IndexUpdateType(IndexUpdateType.Refresh)]
         [ConfigurationEntry("Indexing.Lucene.ReaderTermsIndexDivisor", ConfigurationEntryScope.ServerWideOrPerDatabaseOrPerIndex)]
         public int ReaderTermsIndexDivisor { get; set; }
+        
+        [Description("Expose document score in metadata when sorting by score. Disabling this option may improve query performance.")]
+        [ConfigurationEntry("Indexing.Corax.ExposeDocumentScore", ConfigurationEntryScope.ServerWideOrPerDatabaseOrPerIndex)]
+        [DefaultValue(true)]
+        [IndexUpdateType(IndexUpdateType.Refresh)]
+        public bool CoraxExposeDocumentScore { get; set; }
+        
+        [Description("Expose distance in metadata when sorting by distance. Disabling this option may improve query performance.")]
+        [ConfigurationEntry("Indexing.Corax.ExposeDocumentDistance", ConfigurationEntryScope.ServerWideOrPerDatabaseOrPerIndex)]
+        [DefaultValue(true)]
+        [IndexUpdateType(IndexUpdateType.Refresh)]
+        public bool CoraxExposeDocumentDistance { get; set; }
 
         protected override void ValidateProperty(PropertyInfo property)
         {

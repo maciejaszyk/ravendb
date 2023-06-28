@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Raven.Client;
 using Sparrow;
 using Sparrow.Json;
@@ -156,11 +157,12 @@ namespace Raven.Server.Documents
 
         All = Id | LowerId | Data | ChangeVector
     }
-
-
+    
     public struct SpatialResult
     {
-        public double Distance, Latitude, Longitude;
+        public double Distance;
+        public double Latitude;
+        public double Longitude;
 
         public static SpatialResult Invalid = new SpatialResult
         {
@@ -168,6 +170,14 @@ namespace Raven.Server.Documents
             Latitude = double.NaN,
             Longitude = double.NaN
         };
+
+        public static explicit operator SpatialResult?(Corax.Utils.Spatial.SpatialResult? coraxSpatialResult)
+        {
+            if (coraxSpatialResult is null)
+                return null;
+            
+            return new SpatialResult {Distance = coraxSpatialResult.Value.Distance, Latitude = coraxSpatialResult.Value.Latitude, Longitude = coraxSpatialResult.Value.Longitude};
+        }
 
         public DynamicJsonValue ToJson()
         {

@@ -221,7 +221,7 @@ function execute(doc, args){
         public bool HasOrderByCustom;
 
         public bool HasOrderByRandom;
-
+        
         public DateTime CreatedAt;
 
         public DateTime LastQueriedAt;

@@ -7,6 +7,7 @@ using Sparrow.Server.Utils;
 
 namespace Voron.Data.PostingLists;
 
+// When making changes here, please remember to update NativeUnmanagedList if necessary.
 public unsafe struct NativeIntegersList : IDisposable
 {
     private readonly ByteStringContext _ctx;
