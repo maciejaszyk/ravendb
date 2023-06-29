@@ -680,7 +680,7 @@ namespace Corax
         }
         
        /// <returns>Encoded entryId</returns>
-        public unsafe long Update(ReadOnlySpan<byte> key, Span<byte> data)
+        public unsafe long Update(ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
         {
             using var _ = Slice.From(_transaction.Allocator, key, ByteStringType.Mutable, out var slice);
             if (_indexedEntriesByKey.Remove(slice.Content, out var existing))

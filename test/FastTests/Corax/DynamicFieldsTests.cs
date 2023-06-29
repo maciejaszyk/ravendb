@@ -155,7 +155,7 @@ public unsafe class DynamicFieldsTests : StorageTest
             entry.Write(1, "Oren"u8);
             entry.WriteDynamic("Rank", "U"u8);
             using var _ = entry.Finish(out var preparedItem);
-            writer.Index(preparedItem.ToSpan());
+            writer.Index("users/1",  preparedItem.ToSpan());
             writer.Commit();
         }
 
@@ -166,7 +166,7 @@ public unsafe class DynamicFieldsTests : StorageTest
             entry.Write(1, "Oren"u8);
             entry.WriteDynamic("Name", "Oren"u8);
             using var _ = entry.Finish(out var preparedItem);
-            writer.Update("Id", "users/1"u8, preparedItem.ToSpan());
+            writer.Update("users/1"u8, preparedItem.ToSpan());
             writer.Commit();
         }
 
@@ -178,7 +178,7 @@ public unsafe class DynamicFieldsTests : StorageTest
             entry.Write(1, "Eini"u8);
             entry.WriteDynamic("Name", "Eini"u8);
             using var _ = entry.Finish(out var preparedItem);
-            writer.Update("Id", "users/1"u8, preparedItem.ToSpan());
+            writer.Update( "users/1"u8, preparedItem.ToSpan());
             writer.Commit();
         }
 
@@ -325,7 +325,7 @@ public unsafe class DynamicFieldsTests : StorageTest
             entry.Write(1, "Oren"u8);
             entry.WriteDynamic("Rank", "U"u8);
             using var _ = entry.Finish(out var preparedItem);
-            writer.Index(preparedItem.ToSpan());
+            writer.Index("users/1",preparedItem.ToSpan());
             writer.Commit();
         }
         
@@ -336,7 +336,7 @@ public unsafe class DynamicFieldsTests : StorageTest
             entry.Write(1, "Oren"u8);
             entry.WriteDynamic("Name", "Maciej"u8);
             using var _ = entry.Finish(out var preparedItem);
-            writer.Update("Id", "users/1"u8, preparedItem.ToSpan());
+            writer.Update( "users/1"u8, preparedItem.ToSpan());
             writer.Commit();
         }
 
@@ -349,7 +349,7 @@ public unsafe class DynamicFieldsTests : StorageTest
         
         using (var writer = new IndexWriter(Env, fields))
         {
-            writer.TryDeleteEntry("Id", "users/1");
+            writer.TryDeleteEntry("users/1");
             writer.Commit();
         }
 
@@ -381,7 +381,7 @@ public unsafe class DynamicFieldsTests : StorageTest
             entry.Write(1, "Oren"u8);
             entry.WriteDynamic("Rank", "U"u8);
             using var _ = entry.Finish(out var preparedItem);
-            writer.Index(preparedItem.ToSpan());
+            writer.Index("users/1", preparedItem.ToSpan());
             writer.Commit();
         }
         
@@ -392,7 +392,7 @@ public unsafe class DynamicFieldsTests : StorageTest
             entry.Write(1, "Oren"u8);
             entry.WriteDynamic("Name", "Maciej"u8);
             using var _ = entry.Finish(out var preparedItem);
-            writer.Update("Id", "users/1"u8, preparedItem.ToSpan());
+            writer.Update("users/1"u8, preparedItem.ToSpan());
             writer.Commit();
         }
 
@@ -410,7 +410,7 @@ public unsafe class DynamicFieldsTests : StorageTest
             entry.Write(1, "Eini"u8);
             entry.WriteDynamic("Name", "Eini"u8);
             using var _ = entry.Finish(out var preparedItem);
-            writer.Update("Id", "users/1"u8, preparedItem.ToSpan());
+            writer.Update("users/1"u8, preparedItem.ToSpan());
             writer.Commit();
         }
         
