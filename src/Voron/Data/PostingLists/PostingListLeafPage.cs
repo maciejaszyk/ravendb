@@ -142,7 +142,7 @@ public readonly unsafe struct PostingListLeafPage
 
         (int entriesCount, int sizeUsed) = encoder.Write(_page.DataPointer, Constants.Storage.PageSize - PageHeader.SizeOf);
 
-        Debug.Assert(entriesCount > 0);
+        Debug.Assert(entriesCount > 0 || encoder.Count == 0 && entriesCount == 0);
         Debug.Assert(sizeUsed < Constants.Storage.PageSize);
         newHeader->SizeUsed = (ushort)sizeUsed;
         newHeader->NumberOfEntries = entriesCount;

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -10,10 +9,12 @@ using Sparrow;
 using Sparrow.Binary;
 using Sparrow.Server;
 using Voron.Data.BTrees;
+using Voron.Data.PostingLists;
 using Voron.Exceptions;
 using Voron.Global;
 using Voron.Impl;
 using Voron.Impl.Paging;
+using Voron.Util.PFor;
 
 namespace Voron.Data.Containers
 {
@@ -29,9 +30,6 @@ namespace Voron.Data.Containers
     
     public readonly unsafe ref struct Container
     {
-        private static readonly Slice AllPagesTreeName;
-        private static readonly Slice FreePagesTreeName;
-
         private const int MinimumAdditionalFreeSpaceToConsider = 64;
         private const int NumberOfReservedEntries = 4; // all pages, free pages, number of entries, next free page
 
@@ -128,11 +126,6 @@ namespace Voron.Data.Containers
         static Container()
         {
             Debug.Assert(sizeof(ItemMetadata) == sizeof(ushort));
-            using (StorageEnvironment.GetStaticContext(out var ctx))
-            {
-                Slice.From(ctx, "AllPagesSet", ByteStringType.Immutable, out AllPagesTreeName);
-                Slice.From(ctx, "FreePagesSet", ByteStringType.Immutable, out FreePagesTreeName);
-            }
         }        
 
         private readonly Page _page;
@@ -229,25 +222,13 @@ namespace Voron.Data.Containers
             Unsafe.WriteUnaligned(ref nextFreePageBuffer[0], page.PageNumber);
 
             // We are creating a set where we will store the free list.
-            using var freePagesTree = Tree.Create(llt, llt.Transaction, FreePagesTreeName);
-            using var allPagesState = Tree.Create(llt, llt.Transaction, AllPagesTreeName);
+            PostingList.Create(llt, ref MemoryMarshal.AsRef<PostingListState>(freeListTreeState));
 
-            fixed (void* pState = freeListTreeState)
-            {
-                freePagesTree.State.CopyTo((TreeRootHeader*)pState);
-            }
-
-            // We are adding the root to the list of all pages.
-            long pageNum = Bits.SwapBytes(page.PageNumber);
-            using (Slice.From(llt.Allocator, (byte*)&pageNum, sizeof(long), ByteStringType.Immutable, out var slice))
-            {
-                allPagesState.DirectAdd(slice, 0, out _);
-            }
-
-            fixed (void* pState = allPagesTreeState)
-            {
-                allPagesState.State.CopyTo((TreeRootHeader*)pState);
-            }
+            using var encoder = new FastPForEncoder(llt.Allocator);
+            var buffer = stackalloc long[1];
+            buffer[0] = page.PageNumber << 2; // need to encode for the posting list usage
+            encoder.Encode(buffer, 1);
+            PostingList.Create(llt, ref MemoryMarshal.AsRef<PostingListState>(allPagesTreeState), encoder);
             return page.PageNumber;
         }
 
@@ -329,7 +310,7 @@ namespace Voron.Data.Containers
                 overflowPageHeader->PageLevelMetadata = pageLevelMetadata;
 
                 rootContainer.Header.NumberOfOverflowPages += numberOfPages;
-                ModifyMetadataList(llt, rootContainer, ContainerPageHeader.AllPagesOffset, add: true, overflowPage.PageNumber);
+                ModifyMetadataList(llt, GetItemId(rootContainer.Header.PageNumber, ContainerPageHeader.AllPagesOffset), add: true, overflowPage.PageNumber);
 
                 allocatedSpace = overflowPage.AsSpan(PageHeader.SizeOf, size);
                 return overflowPage.PageNumber * Constants.Storage.PageSize;
@@ -404,8 +385,13 @@ namespace Voron.Data.Containers
             item.SetSize(size, _page.Pointer, ref entryStartOffset);
             allocatedSpace = _page.AsSpan(entryStartOffset, size);
 
-            long id = Header.PageNumber * Constants.Storage.PageSize + IndexToOffset(pos);
+            long id = GetItemId(Header.PageNumber, pos);
             return id;
+        }
+
+        private static long GetItemId(long pageNum,int pos)
+        {
+            return pageNum * Constants.Storage.PageSize + IndexToOffset(pos);
         }
 
         private static long IndexToOffset(int pos)
@@ -425,60 +411,47 @@ namespace Voron.Data.Containers
             return (int)offset >> 3;
         }
 
+        private static PostingList GetPostingList(LowLevelTransaction llt, long listId)
+        {
+            if (llt.Transaction.GetContainerList(listId, out var list))
+                return list;
+            Get(llt, listId, out var state);
+            list = new PostingList(llt, Slices.Empty, *(PostingListState*)state.Address);
+            llt.Transaction.RegisterContainerList(listId, list);
+            return list;
+        }
+
         private static Container MoveToNextPage(LowLevelTransaction llt, long containerId, long pageLevelMetadata, Container container, int size)
         {
+            Span<long> entries = stackalloc long[256];
             Debug.Assert(size <= MaxSizeInsideContainerPage);
 
             var rootPage = llt.ModifyPage(containerId);
             var rootContainer = new Container(rootPage);
-            RemovePageFromContainerFreeList( rootContainer,  container);// we take it out now..., we'll add to the free list when we delete from it
+            UpdateList( rootContainer,  container, ContainerPageHeader.FreeListOffset, add: false);// we take it out now..., we'll add to the free list when we delete from it
             
             // We wont work as hard if we know that the entry is too big.
             bool isBigEntry = size >= (Constants.Storage.PageSize / 6);
-            int tries = isBigEntry ? 4 : 128;
 
             // PERF: Even if this condition never happens, we need the code to ensure that we have a bounded time to find a free page.
             // This is the case where at some point we need to just give up or end up wasting more time to find a page than the time
             // we will use to create and store in disk a new one.
-            int i = 0;
-            for (; i < tries; i++)  
-            {                
-                var freeListState = rootContainer.GetItemPtr(ContainerPageHeader.FreeListOffset, out var _);
-                
-                Tree freeList = Tree.Open(llt, llt.Transaction, FreePagesTreeName, (TreeRootHeader*)freeListState);
-                var it = freeList.Iterate(prefetch:false);
-                if (it.MoveNext() == false)
-                    break;
+            int tries = isBigEntry ? 4 : 128;
 
-                ValueReader readerForCurrent = it.CurrentKey.CreateReader();
-                long pageNum = readerForCurrent.ReadBigEndianInt64();
-                var page = llt.ModifyPage(pageNum);
-                var maybe = new Container(page);
-
-                // we want to ensure that the free list doesnt get too big...
-                // if we don't have space here, we should discard it from the free list
-                // however we need to be sure you are not going to do so when the entries
-                // are abnormally big. In those cases, the reasonable thing to do is just
-                // skip it and create a new page for it but without discarding pages that
-                // would be reasonably used by following requests. 
-                
-                // if we exclude this based on the pageLevelMetadata match, this is fine,
-                // since we assume that there are *long* usage periods for each pageLevelMetadata
-                // so we aren't expected to switch between them too often
-                if (!isBigEntry || 
-                    PageMetadataMatch(maybe, pageLevelMetadata))
-                {
-                    RemovePageFromContainerFreeList(rootContainer, maybe);
-                }
-
-                if (maybe.HasEnoughSpaceFor(size + MinimumAdditionalFreeSpaceToConsider) == false)
-                    continue;
-                
-                // we register it as the next free page
-                rootContainer.UpdateNextFreePage(page.PageNumber);
-                
-                Debug.Assert(container.Header.PageLevelMetadata == pageLevelMetadata || pageLevelMetadata == -1);
-                return  maybe;
+            long listId = GetItemId(rootContainer.Header.PageNumber, ContainerPageHeader.FreeListOffset);
+            var list = GetPostingList(llt, listId);
+            ref var additions = ref list.GetAdditions();
+            if (additions.Count > 0)
+            {
+                if (HasPageMatchingAllocation(rootContainer, container, additions.Items, out Page nextPage)) 
+                    return new Container(nextPage);   
+            }
+            FlushList(llt, listId, list);
+            var it = list.Iterate();
+            if (it.Fill(entries, out var read))
+            {
+                if (HasPageMatchingAllocation(rootContainer, container, entries[..read], out Page nextPage)) 
+                    return new Container(nextPage);
             }
 
             // no existing pages remaining, allocate new one
@@ -488,20 +461,58 @@ namespace Voron.Data.Containers
             container = new Container(newPage);
             container.Header.PageLevelMetadata = pageLevelMetadata;
             
-            AddPageToContainerFreeList(rootContainer, container);
+            UpdateList(rootContainer, container, ContainerPageHeader.AllPagesOffset, add: true);
 
             return container;
 
-            void RemovePageFromContainerFreeList(Container parent, Container page)
+            void UpdateList(Container parent, Container page, int offset, bool add)
             {
-                page.Header.OnFreeList = false;
-                ModifyMetadataList(llt, parent, ContainerPageHeader.FreeListOffset, add: false, page.Header.PageNumber);
+                page.Header.OnFreeList = add;
+                ModifyMetadataList(llt,GetItemId(parent.Header.PageNumber, offset), add: add, page.Header.PageNumber);
             }
 
-            void AddPageToContainerFreeList(Container parent, Container page)
+            bool HasPageMatchingAllocation(
+                in Container rootContainer,
+                in Container currentContainer,
+                Span<long> entries , out Page moveToNextPage)
             {
-                page.Header.OnFreeList = true;
-                ModifyMetadataList(llt, parent, ContainerPageHeader.AllPagesOffset, add: true, page.Header.PageNumber);
+                for (int i = 0; i < entries.Length && i < tries; i++)
+                {
+                    long pageNum = entries[i] >> 2;
+                    var page = llt.ModifyPage(pageNum);
+                    var maybe = new Container(page);
+
+                    // we want to ensure that the free list doesnt get too big...
+                    // if we don't have space here, we should discard it from the free list
+                    // however we need to be sure you are not going to do so when the entries
+                    // are abnormally big. In those cases, the reasonable thing to do is just
+                    // skip it and create a new page for it but without discarding pages that
+                    // would be reasonably used by following requests. 
+
+                    // if we exclude this based on the pageLevelMetadata match, this is fine,
+                    // since we assume that there are *long* usage periods for each pageLevelMetadata
+                    // so we aren't expected to switch between them too often
+                    if (!isBigEntry ||
+                        PageMetadataMatch(maybe, pageLevelMetadata))
+                    {
+                        UpdateList(rootContainer, maybe, ContainerPageHeader.FreeListOffset, add: false);
+                    }
+
+                    if (maybe.HasEnoughSpaceFor(size + MinimumAdditionalFreeSpaceToConsider) == false)
+                        continue;
+
+                    // we register it as the next free page
+                    rootContainer.UpdateNextFreePage(page.PageNumber);
+
+                    Debug.Assert(currentContainer.Header.PageLevelMetadata == pageLevelMetadata || pageLevelMetadata == -1);
+                    {
+                        moveToNextPage = maybe._page;
+                        return true;
+                    }
+                }
+
+                moveToNextPage = default;
+                return false;
             }
         }
 
@@ -518,22 +529,27 @@ namespace Voron.Data.Containers
         {
             var list = new List<long>();
             Span<long> items = stackalloc long[256];
+            Span<long> entries = stackalloc long[256];
 
             var it = GetAllPagesSet(llt, containerId);
-            while(it.TryMoveNext(out var pageNum))
+            while(it.Fill(entries, out var read))
             {
-                var page = llt.GetPage(pageNum);
-                int offset = 0;
-                int itemsLeftOnCurrentPage = 0;
-                do
+                for (int j = 0; j < read; j++)
                 {
-                    int count = GetEntriesInto(containerId, ref offset, page, items, out itemsLeftOnCurrentPage);
+                    var pageNum = entries[j] >> 2;
+                    var page = llt.GetPage(pageNum);
+                    int offset = 0;
+                    int itemsLeftOnCurrentPage = 0;
+                    do
+                    {
+                        int count = GetEntriesInto(containerId, ref offset, page, items, out itemsLeftOnCurrentPage);
 
-                    for(int i = 0; i < count; ++i)
-                        list.Add(items[i]);
+                        for(int i = 0; i < count; ++i)
+                            list.Add(items[i]);
                     
-                    //need read to the end of page
-                } while (itemsLeftOnCurrentPage > 0);
+                        //need read to the end of page
+                    } while (itemsLeftOnCurrentPage > 0);
+                }
             }
             return list;
         }
@@ -576,57 +592,29 @@ namespace Voron.Data.Containers
             throw new VoronErrorException("The page is not a container page");
         }
 
-        public struct AllPagesIterator
-        {
-            private readonly Tree _tree;
-            private readonly TreeIterator _iterator;
-            private bool _hasValue;
-
-            public AllPagesIterator(Tree tree)
-            {
-                _tree = tree;
-                _iterator = _tree.Iterate(prefetch: false);
-                _hasValue = _iterator.Seek(Slices.BeforeAllKeys);
-            }
-
-            public bool TryMoveNext(out long pageNum)
-            {
-                if (_hasValue == false)
-                {
-                    _iterator.Dispose();
-                    _tree.Dispose();
-                    pageNum = -1;
-                    return false;
-                }
-                pageNum = _iterator.CurrentKey.CreateReader().ReadBigEndianInt64();
-                _hasValue = _iterator.MoveNext();
-                return true;
-            }
-        }
-
-        public static (Tree AllPages, Tree FreePages) GetPagesFor(LowLevelTransaction llt, long containerId)
+        public static (PostingList AllPages, PostingList FreePages) GetPagesFor(LowLevelTransaction llt, long containerId)
         {
             var rootPage = llt.GetPage(containerId);
             var rootContainer = new Container(rootPage);
 
             var pAllPagesStatePtr = rootContainer.GetItemPtr(ContainerPageHeader.AllPagesOffset, out _);
-            Tree allPages = Tree.Open(llt, llt.Transaction, AllPagesTreeName, (TreeRootHeader*)pAllPagesStatePtr);
+            var allPages = new PostingList(llt, Slices.Empty, *(PostingListState*)pAllPagesStatePtr); 
+            
 
             var freeListStatePtr = rootContainer.GetItemPtr(ContainerPageHeader.FreeListOffset, out _);
-            Tree freePages = Tree.Open(llt, llt.Transaction, AllPagesTreeName, (TreeRootHeader*)freeListStatePtr);
+            var freePages = new PostingList(llt, Slices.Empty, *(PostingListState*)freeListStatePtr); 
 
             return (allPages, freePages);
         }
 
-        public static AllPagesIterator GetAllPagesSet(LowLevelTransaction llt, long containerId)
+        public static PostingList.Iterator GetAllPagesSet(LowLevelTransaction llt, long containerId)
         {
             var rootPage = llt.GetPage(containerId);
             var rootContainer = new Container(rootPage);
             
             var pState = rootContainer.GetItemPtr(ContainerPageHeader.AllPagesOffset, out _);
-            Tree tree = Tree.Open(llt, llt.Transaction, AllPagesTreeName, (TreeRootHeader*)pState);
-
-            return new AllPagesIterator(tree);
+            var pl = new PostingList(llt, Slices.Empty, *(PostingListState*)pState);
+            return pl.Iterate();
 
         }
 
@@ -648,21 +636,17 @@ namespace Voron.Data.Containers
             return p;
         }
 
-        private static void ModifyMetadataList(LowLevelTransaction llt, in Container rootContainer, int offset, bool add, long value)
+        private static void ModifyMetadataList(LowLevelTransaction llt, long listId, bool add, long value)
         {
-            var pState = rootContainer.GetItemPtr(offset, out _);
-
-            Debug.Assert(llt.IsDirtyPage(rootContainer._page.PageNumber));
-            Tree tree = Tree.Open(llt, llt.Transaction, AllPagesTreeName, (TreeRootHeader*)pState);
-            value = Bits.SwapBytes(value);
-            using (Slice.External(llt.Allocator, (byte*)&value, sizeof(long), ByteStringType.Immutable, out var slice))
+            var postingList = GetPostingList(llt, listId);
+            if (add)
             {
-                if (add)
-                    tree.DirectAdd(slice, 0, out _);
-                else
-                    tree.Delete(slice);
+                postingList.Add(value << 2);
             }
-            tree.State.CopyTo((TreeRootHeader*)pState);
+            else
+            {
+                postingList.Remove((value << 2));
+            }
         }
 
         private bool HasEnoughSpaceFor(int reqSize)
@@ -709,7 +693,7 @@ namespace Voron.Data.Containers
             {
                 var numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(page.OverflowSize);
                 rootContainer.Header.NumberOfOverflowPages -= numberOfOverflowPages;
-                ModifyMetadataList(llt, rootContainer, ContainerPageHeader.AllPagesOffset, add: false, pageNum);
+                ModifyMetadataList(llt, GetItemId(rootContainer.Header.PageNumber, ContainerPageHeader.AllPagesOffset), add: false, pageNum);
                 
                 for (var pageToRelease = pageNum; pageToRelease < pageNum + numberOfOverflowPages; ++pageToRelease)
                     llt.FreePage(pageToRelease);
@@ -758,9 +742,9 @@ namespace Voron.Data.Containers
                     rootContainer.UpdateNextFreePage(containerId);
                 }
                 
-                ModifyMetadataList(llt, rootContainer, ContainerPageHeader.AllPagesOffset, add: false, page.PageNumber);
+                ModifyMetadataList(llt, GetItemId(rootContainer.Header.PageNumber, ContainerPageHeader.AllPagesOffset), add: false, page.PageNumber);
                 if (container.Header.OnFreeList)
-                    ModifyMetadataList(llt, rootContainer, ContainerPageHeader.FreeListOffset, add: false, page.PageNumber);
+                    ModifyMetadataList(llt, GetItemId(rootContainer.Header.PageNumber, ContainerPageHeader.FreeListOffset), add: false, page.PageNumber);
                 
                 llt.FreePage(pageNum);
                 return;
@@ -775,7 +759,7 @@ namespace Voron.Data.Containers
                 containerSpaceUsed + averageSize * 2 <= Constants.Storage.PageSize) // has enough space to be on the free list? 
             {
                 container.Header.OnFreeList = true;
-                ModifyMetadataList(llt, rootContainer, ContainerPageHeader.FreeListOffset, add: true, page.PageNumber);
+                ModifyMetadataList(llt, GetItemId(rootContainer.Header.PageNumber, ContainerPageHeader.FreeListOffset), add: true, page.PageNumber);
             }
         }
 
@@ -993,6 +977,14 @@ namespace Voron.Data.Containers
                 int size = metadata.Get(ref p);
                 spans[i] = new(p, size);
             }
+        }
+
+        public static void FlushList(LowLevelTransaction llt,long listId, PostingList postingList)
+        {
+            postingList.PrepareForCommit();
+            Span<byte> mutable = GetMutable(llt,listId);
+            ref var state = ref MemoryMarshal.AsRef<PostingListState>(mutable);
+            state = postingList.State;
         }
     }
 }

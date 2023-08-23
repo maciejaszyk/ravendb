@@ -20,6 +20,8 @@ namespace Voron.Data.PostingLists
         [FieldOffset(24)]
         public long NumberOfEntries;
 
+        public long PageCount => BranchPages + LeafPages;
+
         public override string ToString()
         {
             return $"{nameof(RootObjectType)}: {RootObjectType}, {nameof(Depth)}: {Depth}, {nameof(RootPage)}: {RootPage}, {nameof(BranchPages)}: {BranchPages}, {nameof(LeafPages)}: {LeafPages}";

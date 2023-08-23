@@ -27,6 +27,8 @@ namespace Voron.Data.PostingLists
 
         private NativeIntegersList _additions, _removals;
 
+        public ref NativeIntegersList GetAdditions() => ref _additions;
+        
         public PostingList(LowLevelTransaction llt, Slice name, in PostingListState state)
         {
             if (state.RootObjectType != RootObjectType.Set)
@@ -83,14 +85,17 @@ namespace Voron.Data.PostingLists
             }
         }
 
-        public List<long> DumpAllValues()
+        public List<long> DumpAllValues(int rightShift  = 0)
         {
             var iterator = Iterate();
             Span<long> buffer = stackalloc long[1024];
             var results = new List<long>();
             while (iterator.Fill(buffer, out var read) && read != 0)
             {
-                results.AddRange(buffer[0..read].ToArray());
+                for (int i = 0; i < read; i++)
+                {
+                    results.Add(buffer[i] >> rightShift);
+                }
             }
 
             return results;
@@ -390,6 +395,9 @@ namespace Voron.Data.PostingLists
             decoder.Dispose();
             tempList.Dispose();
             encoder.Dispose();
+            
+            _additions.Clear();
+            _removals.Clear();
         }
 
         private void UpdateList(long* additions, int additionsCount, long* removals, int removalsCount, 

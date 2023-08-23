@@ -512,20 +512,25 @@ namespace Voron.Debugging
             if (includeDetails)
             {
                 pageDensities = new();
+                Span<long> entries = stackalloc long[256];
                 var it = Container.GetAllPagesSet(_tx, page);
-                while (it.TryMoveNext(out var pageNum))
+                while (it.Fill(entries, out var read))
                 {
-                    // cannot use GetPageHeaderForDebug since we are reading not just from the header
-                    Page cur = _tx.GetPage(pageNum);
-                    if (cur.IsOverflow)
+                    for (int i = 0; i < read; i++)
                     {
-                        int numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(cur.OverflowSize);
-                        pageDensities.Add((double)cur.OverflowSize / (numberOfOverflowPages * Constants.Storage.PageSize));
-                    }
-                    else
-                    {
-                        var container = new Container(cur);
-                        pageDensities.Add((double)container.SpaceUsed() / Constants.Storage.PageSize);
+                        var pageNum = entries[i] >> 2;
+                        // cannot use GetPageHeaderForDebug since we are reading not just from the header
+                        Page cur = _tx.GetPage(pageNum);
+                        if (cur.IsOverflow)
+                        {
+                            int numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(cur.OverflowSize);
+                            pageDensities.Add((double)cur.OverflowSize / (numberOfOverflowPages * Constants.Storage.PageSize));
+                        }
+                        else
+                        {
+                            var container = new Container(cur);
+                            pageDensities.Add((double)container.SpaceUsed() / Constants.Storage.PageSize);
+                        }
                     }
                 }
             }

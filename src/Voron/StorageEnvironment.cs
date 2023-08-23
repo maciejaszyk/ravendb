@@ -1277,20 +1277,25 @@ namespace Voron
             {
                 var overflowName = $"{name}/OverflowPage";
                 var (allPages, freePages) = Container.GetPagesFor(tx.LowLevelTransaction, container);
-                RegisterPages(allPages.AllPages(), name + "/AllPagesSet");
-                RegisterPages(freePages.AllPages(), name + "/FreePagesSet");
+                RegisterPages(allPages.DumpAllValues(rightShift: 2), name + "/AllPagesSet");
+                RegisterPages(freePages.DumpAllValues(rightShift: 2), name + "/FreePagesSet");
+                Span<long> entries = stackalloc long[256];
                 var iterator = Container.GetAllPagesSet(tx.LowLevelTransaction, container);
-                while (iterator.TryMoveNext(out var page))
+                while (iterator.Fill(entries, out var read))
                 {
-                    var pageObject = tx.LowLevelTransaction.GetPage(page);
-                    r.Add(page, name);
-                    if (pageObject.IsOverflow == false)
-                        continue;
+                    for (int i = 0; i < read; i++)
+                    {
+                        var page = entries[i] >> 2;
+                        var pageObject = tx.LowLevelTransaction.GetPage(page);
+                        r.Add(page, name);
+                        if (pageObject.IsOverflow == false)
+                            continue;
                     
 
-                    var numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(pageObject.OverflowSize);
-                    for (int overflowPage = 1; overflowPage < numberOfOverflowPages; ++overflowPage)
-                        r.Add(page + overflowPage, overflowName);
+                        var numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(pageObject.OverflowSize);
+                        for (int overflowPage = 1; overflowPage < numberOfOverflowPages; ++overflowPage)
+                            r.Add(page + overflowPage, overflowName);
+                    }
                 }
             }
 

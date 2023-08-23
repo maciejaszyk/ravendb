@@ -44,7 +44,7 @@ public unsafe struct FastPForDecoder : IDisposable
     
     public void Init( byte* input, int size)
     {
-        if (size <= sizeof(PForHeader)) throw new ArgumentOutOfRangeException(nameof(size));
+        if (size < sizeof(PForHeader)) throw new ArgumentOutOfRangeException(nameof(size));
         
         _input = input;
         _end = input + size;

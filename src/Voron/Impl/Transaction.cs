@@ -33,6 +33,8 @@ namespace Voron.Impl
 
         public ByteStringContext Allocator => _lowLevelTransaction.Allocator;
 
+        private Dictionary<long, PostingList> _containers;
+        
         private Dictionary<Slice, PostingList> _postingLists;
         
         private Dictionary<Slice, Table> _tables;
@@ -199,6 +201,18 @@ namespace Voron.Impl
             }
         }
 
+        internal bool GetContainerList(long listId, out PostingList list)
+        {
+            _containers ??= new();
+            return _containers.TryGetValue(listId, out list);
+        }
+
+        internal void RegisterContainerList(long listId, PostingList list)
+        {
+            _containers ??= new();
+            _containers.Add(listId, list);
+        }
+
         public PostingList OpenPostingList(Slice name)
         {
             _postingLists ??= new Dictionary<Slice, PostingList>(SliceStructComparer.Instance);
@@ -282,6 +296,14 @@ namespace Voron.Impl
                         ref var savedState = ref MemoryMarshal.AsRef<PostingListState>(span);
                         savedState = set.State;
                     }
+                }
+            }
+
+            if (_containers != null)
+            {
+                foreach (var (listId, postingList) in _containers)
+                {
+                    Container.FlushList(_lowLevelTransaction, listId, postingList);
                 }
             }
 

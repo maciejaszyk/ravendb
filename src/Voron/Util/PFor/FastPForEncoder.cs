@@ -29,6 +29,7 @@ public sealed unsafe class FastPForEncoder  : IDisposable
     private int _metadataPos;
     private ByteStringContext<ByteStringMemoryCache>.InternalScope _entriesOutputScope;
 
+    public int Count => _count;
 
     public FastPForEncoder(ByteStringContext allocator)
     {
@@ -68,9 +69,9 @@ public sealed unsafe class FastPForEncoder  : IDisposable
         }
         _metadata.Clear();
         
-        if (_entriesOutputSize < count)
+        var newCount = Math.Max(256, BitOperations.RoundUpToPowerOf2((uint)count));
+        if (_entriesOutputSize < newCount)
         {
-            var newCount = Math.Max(256, BitOperations.RoundUpToPowerOf2((uint)count));
             _entriesOutputScope.Dispose();
             _entriesOutputScope = _allocator.Allocate((int)newCount * sizeof(long), out ByteString bs);
             _entriesOutput = bs.Ptr;
