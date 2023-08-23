@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using Sparrow;
 using Sparrow.Server;
@@ -193,6 +194,16 @@ public sealed unsafe partial class Lookup<TLookupKey> : IPrepareForCommit
         }
     }
 
+    public static Lookup<TLookupKey> Open(LowLevelTransaction llt,LookupState state)
+    {
+        return new Lookup<TLookupKey> { _llt = llt, _state = state };
+    }
+
+    private Lookup()
+    {
+        
+    }
+    
     private Lookup(Slice name, Tree parent)
     {
         Name = name.Clone(parent.Llt.Allocator, ByteStringType.Immutable);
@@ -214,7 +225,7 @@ public sealed unsafe partial class Lookup<TLookupKey> : IPrepareForCommit
     {
         var llt = parent.Llt;
 
-        LookupState* header;
+        LookupState header;
 
         var existing = parent.Read(name);
         if (existing == null)
@@ -222,42 +233,45 @@ public sealed unsafe partial class Lookup<TLookupKey> : IPrepareForCommit
             if (llt.Flags != TransactionFlags.ReadWrite)
                 return null;
 
-
-            var newPage = llt.AllocatePage(1);
-            var compactPageHeader = (LookupPageHeader*)newPage.Pointer;
-            compactPageHeader->PageFlags = LookupPageFlags.Leaf;
-            compactPageHeader->Lower = PageHeader.SizeOf;
-            compactPageHeader->Upper = Constants.Storage.PageSize;
-            compactPageHeader->FreeSpace = Constants.Storage.PageSize - (PageHeader.SizeOf);
-            compactPageHeader->KeysBase = newPage.PageNumber;
-            compactPageHeader->ValuesBase = newPage.PageNumber;
-
+            Create(llt, out header, dictionaryId, termsContainerId);
             using var _ = parent.DirectAdd(name, sizeof(LookupState), out var p);
-            header = (LookupState*)p;
-            *header = new LookupState
-            {
-                RootObjectType = RootObjectType.Lookup,
-                BranchPages = 0,
-                LeafPages = 1,
-                RootPage = newPage.PageNumber,
-                NumberOfEntries = 0,
-                DictionaryId = dictionaryId,
-                TermsContainerId = termsContainerId
-            };
+            *(LookupState*)p = header;
         }
         else
         {
-            header = (LookupState*)existing.Reader.Base;
+            header = *(LookupState*)existing.Reader.Base;
         }
 
-        if (header->RootObjectType != RootObjectType.Lookup)
+        if (header.RootObjectType != RootObjectType.Lookup)
             throw new InvalidOperationException($"Tried to open {name} as a lookup, but it is actually a " +
-                                                header->RootObjectType);
+                                                header.RootObjectType);
 
         return new Lookup<TLookupKey>(name, parent)
         {
             _llt = llt,
-            _state = *header
+            _state = header
+        };
+    }
+
+    public static void Create(LowLevelTransaction llt, out LookupState state, long dictionaryId = -1, long termsContainerId = -1)
+    {
+        var newPage = llt.AllocatePage(1);
+        var compactPageHeader = (LookupPageHeader*)newPage.Pointer;
+        compactPageHeader->PageFlags = LookupPageFlags.Leaf;
+        compactPageHeader->Lower = PageHeader.SizeOf;
+        compactPageHeader->Upper = Constants.Storage.PageSize;
+        compactPageHeader->FreeSpace = Constants.Storage.PageSize - (PageHeader.SizeOf);
+        compactPageHeader->KeysBase = newPage.PageNumber;
+        compactPageHeader->ValuesBase = newPage.PageNumber;
+        state = new LookupState
+        {
+            RootObjectType = RootObjectType.Lookup,
+            BranchPages = 0,
+            LeafPages = 1,
+            RootPage = newPage.PageNumber,
+            NumberOfEntries = 0,
+            DictionaryId = dictionaryId,
+            TermsContainerId = termsContainerId
         };
     }
 

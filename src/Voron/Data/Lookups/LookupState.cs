@@ -19,6 +19,8 @@ namespace Voron.Data.Lookups
         [FieldOffset(32)]
         public long LeafPages;
 
+        public long PageCount => LeafPages + BranchPages;
+
         // used for compact trees only
         [FieldOffset(40)]
         public long DictionaryId;

@@ -1277,25 +1277,18 @@ namespace Voron
             {
                 var overflowName = $"{name}/OverflowPage";
                 var (allPages, freePages) = Container.GetPagesFor(tx.LowLevelTransaction, container);
-                RegisterPages(allPages.DumpAllValues(rightShift: 2), name + "/AllPagesSet");
-                RegisterPages(freePages.DumpAllValues(rightShift: 2), name + "/FreePagesSet");
-                Span<long> entries = stackalloc long[256];
-                var iterator = Container.GetAllPagesSet(tx.LowLevelTransaction, container);
-                while (iterator.Fill(entries, out var read))
+                RegisterPages(allPages, name + "/AllPagesSet");
+                RegisterPages(freePages, name + "/FreePagesSet");
+                foreach (var page in Container.GetAllPagesSet(tx.LowLevelTransaction, container))
                 {
-                    for (int i = 0; i < read; i++)
-                    {
-                        var page = entries[i] >> 2;
-                        var pageObject = tx.LowLevelTransaction.GetPage(page);
-                        r.Add(page, name);
-                        if (pageObject.IsOverflow == false)
-                            continue;
-                    
+                    var pageObject = tx.LowLevelTransaction.GetPage(page);
+                    r.Add(page, name);
+                    if (pageObject.IsOverflow == false)
+                        continue;
 
-                        var numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(pageObject.OverflowSize);
-                        for (int overflowPage = 1; overflowPage < numberOfOverflowPages; ++overflowPage)
-                            r.Add(page + overflowPage, overflowName);
-                    }
+                    var numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(pageObject.OverflowSize);
+                    for (int overflowPage = 1; overflowPage < numberOfOverflowPages; ++overflowPage)
+                        r.Add(page + overflowPage, overflowName);
                 }
             }
 

@@ -512,43 +512,38 @@ namespace Voron.Debugging
             if (includeDetails)
             {
                 pageDensities = new();
-                Span<long> entries = stackalloc long[256];
-                var it = Container.GetAllPagesSet(_tx, page);
-                while (it.Fill(entries, out var read))
+
+                foreach (var pageNum in Container.GetAllPagesSet(_tx, page))
                 {
-                    for (int i = 0; i < read; i++)
+                    // cannot use GetPageHeaderForDebug since we are reading not just from the header
+                    Page cur = _tx.GetPage(pageNum);
+                    if (cur.IsOverflow)
                     {
-                        var pageNum = entries[i] >> 2;
-                        // cannot use GetPageHeaderForDebug since we are reading not just from the header
-                        Page cur = _tx.GetPage(pageNum);
-                        if (cur.IsOverflow)
-                        {
-                            int numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(cur.OverflowSize);
-                            pageDensities.Add((double)cur.OverflowSize / (numberOfOverflowPages * Constants.Storage.PageSize));
-                        }
-                        else
-                        {
-                            var container = new Container(cur);
-                            pageDensities.Add((double)container.SpaceUsed() / Constants.Storage.PageSize);
-                        }
+                        int numberOfOverflowPages = VirtualPagerLegacyExtensions.GetNumberOfOverflowPages(cur.OverflowSize);
+                        pageDensities.Add((double)cur.OverflowSize / (numberOfOverflowPages * Constants.Storage.PageSize));
+                    }
+                    else
+                    {
+                        var container = new Container(cur);
+                        pageDensities.Add((double)container.SpaceUsed() / Constants.Storage.PageSize);
                     }
                 }
             }
             
-            var (allPages, freePages) = Container.GetPagesFor(_tx, page);
+            var (allPages, freePages) = Container.GetPagesStatsFor(_tx, page);
             
             // cannot use GetPageHeaderForDebug since we are reading not just from the header
             var root = new Container(_tx.GetPage(page));
             double density = pageDensities?.Average() ?? -1;
-            long totalPages = allPages.State.NumberOfEntries + root.Header.NumberOfOverflowPages + freePages.State.PageCount + allPages.State.PageCount;
+            long totalPages = allPages.NumberOfEntries + root.Header.NumberOfOverflowPages + freePages.PageCount + allPages.PageCount;
             var treeReport = new TreeReport
             {
                 Type = RootObjectType.Set,
                 Name = name.ToString(),
                 NumberOfEntries = root.GetNumberOfEntries(),
-                LeafPages = allPages.State.NumberOfEntries + allPages.State.LeafPages + freePages.State.LeafPages,
+                LeafPages = allPages.NumberOfEntries,
                 OverflowPages = root.Header.NumberOfOverflowPages,
-                BranchPages = +freePages.State.BranchPages + allPages.State.BranchPages,
+                BranchPages = 0,
                 PageCount = totalPages ,
                 Density = density,
                 AllocatedSpaceInBytes = PagesToBytes(totalPages),

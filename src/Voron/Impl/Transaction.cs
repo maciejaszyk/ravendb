@@ -33,7 +33,7 @@ namespace Voron.Impl
 
         public ByteStringContext Allocator => _lowLevelTransaction.Allocator;
 
-        private Dictionary<long, PostingList> _containers;
+        private Dictionary<long, Lookup<Int64LookupKey>> _containers;
         
         private Dictionary<Slice, PostingList> _postingLists;
         
@@ -201,13 +201,13 @@ namespace Voron.Impl
             }
         }
 
-        internal bool GetContainerList(long listId, out PostingList list)
+        internal bool GetContainerList(long listId, out Lookup<Int64LookupKey> list)
         {
             _containers ??= new();
             return _containers.TryGetValue(listId, out list);
         }
 
-        internal void RegisterContainerList(long listId, PostingList list)
+        internal void RegisterContainerList(long listId, Lookup<Int64LookupKey> list)
         {
             _containers ??= new();
             _containers.Add(listId, list);
@@ -301,9 +301,9 @@ namespace Voron.Impl
 
             if (_containers != null)
             {
-                foreach (var (listId, postingList) in _containers)
+                foreach (var (listId, list) in _containers)
                 {
-                    Container.FlushList(_lowLevelTransaction, listId, postingList);
+                    Container.FlushList(_lowLevelTransaction, listId, list);
                 }
             }
 
