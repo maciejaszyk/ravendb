@@ -92,6 +92,7 @@ public static class CoraxQueryBuilder
         public bool OptimizationIsPossible;
         public bool SkipOrderByClause;
         public bool MatchedByCompoundField;
+        public bool BinaryMatchInQuery = false;
         public FieldMetadata CompoundField;
         public bool Forward => SortField.Ascending;
 
@@ -110,17 +111,17 @@ public static class CoraxQueryBuilder
             OptimizationIsPossible = true;
         }
 
-        public void BinaryMatchTraversed()
-        {
-            OptimizationIsPossible = false;
-            SkipOrderByClause = false;
-        }
+        public void BinaryMatchTraversed() => BinaryMatchInQuery = true;
+
 
         public bool TrySetMultiTermMatchAsStreamingField(IndexSearcher indexSearcher, in FieldMetadata queryField, in MethodType methodType)
         {
             if (OptimizationIsPossible == false)
                 return false;
 
+            if (BinaryMatchInQuery)
+                return false;
+            
             if (FieldMetadataFieldEquals(queryField) == false)
                 return false;
 
@@ -138,14 +139,13 @@ public static class CoraxQueryBuilder
         
         public bool TrySetAsStreamingField(Parameters builderParameters, in CoraxBooleanItem cbi)
         {
-            if (OptimizationIsPossible == false)
+            if (OptimizationIsPossible == false || SkipOrderByClause)
                 return false;
 
-            if (cbi.Operation is UnaryMatchOperation.NotEquals)
+            //In case of MultiTermMatch we cannot apply optimization when:
+            //- MTM is inside BinaryMatch
+            if (cbi.Operation is not UnaryMatchOperation.Equals &&  BinaryMatchInQuery)
                 return false;
-            
-            if (SkipOrderByClause && OptimizationIsPossible)
-                ThrowFieldIsAlreadyChosen();
 
             if (cbi.Field.Equals(SortField.Field) == false)
             {
