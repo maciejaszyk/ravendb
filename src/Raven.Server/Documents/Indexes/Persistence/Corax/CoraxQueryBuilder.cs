@@ -89,10 +89,9 @@ public static class CoraxQueryBuilder
     public struct StreamingOptimization
     {
         public readonly OrderMetadata SortField;
-        public readonly bool OptimizationIsPossible;
+        public bool OptimizationIsPossible;
         public bool SkipOrderByClause;
         public bool MatchedByCompoundField;
-        public bool BinaryMatchInQuery = false;
         public FieldMetadata CompoundField;
         public bool Forward => SortField.Ascending;
 
@@ -111,7 +110,11 @@ public static class CoraxQueryBuilder
             OptimizationIsPossible = true;
         }
 
-        public void BinaryMatchTraversed() => BinaryMatchInQuery = true;
+        public void BinaryMatchTraversed()
+        {
+            OptimizationIsPossible = false;
+            SkipOrderByClause = false;
+        }
 
         public bool TrySetMultiTermMatchAsStreamingField(IndexSearcher indexSearcher, in FieldMetadata queryField, in MethodType methodType)
         {
@@ -121,9 +124,6 @@ public static class CoraxQueryBuilder
             if (FieldMetadataFieldEquals(queryField) == false)
                 return false;
 
-            if (BinaryMatchInQuery)
-                return false;
-            
             SkipOrderByClause = methodType switch
             {
                 MethodType.StartsWith => SortField.FieldType is MatchCompareFieldType.Sequence,
@@ -149,23 +149,18 @@ public static class CoraxQueryBuilder
 
             if (cbi.Field.Equals(SortField.Field) == false)
             {
-                if ( builderParameters.Index.HasCompoundField(cbi.Field.FieldName, SortField.Field.FieldName, out var offset))
+                if (builderParameters.Index.HasCompoundField(cbi.Field.FieldName, SortField.Field.FieldName, out var offset))
                 {
                     var indexFieldBinding = builderParameters.IndexFieldsMapping.GetByFieldId(builderParameters.IndexFieldsMapping.Count - offset);
                     CompoundField = FieldMetadata.Build(indexFieldBinding.FieldName, indexFieldBinding.FieldTermTotalSumField,
                         indexFieldBinding.FieldId, indexFieldBinding.FieldIndexingMode, indexFieldBinding.Analyzer);
                     MatchedByCompoundField = true;
+                    SkipOrderByClause = true;
                     return true;
                 }
                 return false;
             }
 
-            //In case of MultiTermMatch we cannot apply optimization when:
-            //- MTM is inside BinaryMatch
-            if (cbi.Operation is not UnaryMatchOperation.Equals &&  BinaryMatchInQuery)
-                return false;
-            
-            
             // In case of TermMatch `order by` has to have exactly the same type as queried field.
             // Since we store number as tuple of (String, Double, Long) we could write query like this:
             // where Numeric = 1 order by Numeric as double. Where clause will match all documents where Numeric casted to long is equal 1 (e.g. 1.2, 1.3, 1.9) but order by will sort with precision.
@@ -176,8 +171,6 @@ public static class CoraxQueryBuilder
                 double or float => SortField.FieldType is MatchCompareFieldType.Floating,
                 _ => SortField.FieldType is MatchCompareFieldType.Sequence
             };
-            
-            //Todo: when any document contains list in sorted field we may consider disabling streaming optimization.  
             
             if (matchOnType == false)
                 return false;
@@ -194,7 +187,7 @@ public static class CoraxQueryBuilder
         }
     }
 
-    private static IQueryMatch MaterializeWhenNeeded(Parameters builderParameters, IQueryMatch source, ref StreamingOptimization streamingConfiguration)
+    private static IQueryMatch MaterializeWhenNeeded(Parameters builderParameters, IQueryMatch source)
     {
         switch (source)
         {
@@ -202,11 +195,13 @@ public static class CoraxQueryBuilder
                 source = cbq.Materialize();
                 break;
             case CoraxBooleanItem cbi:
-                streamingConfiguration.TrySetAsStreamingField(builderParameters,cbi);
-                if (streamingConfiguration.MatchedByCompoundField)
-                    return cbi.OptimizeCompoundField(ref streamingConfiguration);
+                if (builderParameters.StreamingDisabled.TrySetAsStreamingField(builderParameters, cbi) == false)
+                    return source;
+                
+                if (builderParameters.StreamingDisabled.MatchedByCompoundField)
+                    return cbi.OptimizeCompoundField(ref builderParameters.StreamingDisabled);
 
-                source = cbi.Materialize(ref streamingConfiguration);
+                source = cbi.Materialize(ref builderParameters.StreamingDisabled);
                 break;
         }
 
@@ -221,12 +216,12 @@ public static class CoraxQueryBuilder
             var metadata = builderParameters.Query.Metadata;
             var indexSearcher = builderParameters.IndexSearcher;
             sortMetadata = GetSortMetadata(builderParameters);
-            var streamingOptimization = new StreamingOptimization(indexSearcher, sortMetadata, builderParameters.HasBoost);
+            builderParameters.StreamingDisabled = new StreamingOptimization(indexSearcher, sortMetadata, builderParameters.HasBoost);
             
             if (metadata.Query.Where is not null)
             {
-                coraxQuery = ToCoraxQuery(builderParameters, metadata.Query.Where, ref streamingOptimization);
-                coraxQuery = MaterializeWhenNeeded(builderParameters, coraxQuery, ref streamingOptimization);
+                coraxQuery = ToCoraxQuery(builderParameters, metadata.Query.Where);
+                coraxQuery = MaterializeWhenNeeded(builderParameters, coraxQuery);
             }
             // We sort on known field types, we'll optimize based on the first one to get the rest
             else if (sortMetadata is [{ FieldType: MatchCompareFieldType.Floating or MatchCompareFieldType.Integer or MatchCompareFieldType.Sequence } sortBy, ..])
@@ -240,7 +235,7 @@ public static class CoraxQueryBuilder
                 // We have no where clause and a sort by index, can just scan over the relevant index if there is a single order by clause
                 // if we have multiple clauses, we'll get the first $TAKE+1 terms from the index, then sort just those, leading to the same
                 // behavior, but far faster
-                streamingOptimization.SkipOrderByClause = sortMetadata.Length == 1;
+                builderParameters.StreamingDisabled.SkipOrderByClause = sortMetadata.Length == 1;
                 var betweenQuery =  sortBy.FieldType switch
                 {
                      MatchCompareFieldType.Integer => indexSearcher.BetweenQuery(sortBy.Field, long.MinValue, long.MaxValue, forward: sortBy.Ascending, streamingEnabled: true, maxNumberOfTerms: maxTermToScan),
@@ -257,7 +252,7 @@ public static class CoraxQueryBuilder
             }
 
 
-            if (sortMetadata is not null && streamingOptimization.SkipOrderByClause == false)
+            if (sortMetadata is not null && builderParameters.StreamingDisabled.SkipOrderByClause == false)
                 coraxQuery = OrderBy(builderParameters, coraxQuery, sortMetadata);
 
             // The parser already throws parse exception if there is a syntax error.
@@ -266,7 +261,7 @@ public static class CoraxQueryBuilder
         }
     }
 
-    private static IQueryMatch ToCoraxQuery(Parameters builderParameters, QueryExpression expression, ref StreamingOptimization streamingOptimization, bool exact = false, int? proximity = null)
+    private static IQueryMatch ToCoraxQuery(Parameters builderParameters, QueryExpression expression, bool exact = false, int? proximity = null)
     {
         var indexSearcher = builderParameters.IndexSearcher;
         var metadata = builderParameters.Metadata;
@@ -320,68 +315,67 @@ public static class CoraxQueryBuilder
                             return TranslateBetweenQuery(builderParameters, bq, exact);
                     }
                     
-                    streamingOptimization.BinaryMatchTraversed();
+                    builderParameters.StreamingDisabled.BinaryMatchTraversed();
                     switch (@where.Left, @where.Right)
                     {
                         case (NegatedExpression ne1, NegatedExpression ne2):
-                            left = ToCoraxQuery(builderParameters, ne1.Expression, ref builderParameters.StreamingDisabled, exact);
-                            right = ToCoraxQuery(builderParameters, ne2.Expression, ref builderParameters.StreamingDisabled, exact);
+                            left = ToCoraxQuery(builderParameters, ne1.Expression, exact);
+                            right = ToCoraxQuery(builderParameters, ne2.Expression, exact);
 
-                            TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out var merged, ref builderParameters.StreamingDisabled, true);
+                            TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out var merged, true);
 
                             return indexSearcher.AndNot(builderParameters.AllEntries.Replay(), indexSearcher.Or(left, right), token: builderParameters.Token);
 
                         case (NegatedExpression ne1, _):
-                            left = ToCoraxQuery(builderParameters, @where.Right, ref builderParameters.StreamingDisabled, exact);
+                            left = ToCoraxQuery(builderParameters, @where.Right, exact);
                             if (TryUseNegatedQuery(builderParameters, ne1, out right, exact) == false)
                             {
-                                right = ToCoraxQuery(builderParameters, ne1.Expression, ref builderParameters.StreamingDisabled, exact);
-                                TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged,
-                                    ref builderParameters.StreamingDisabled,  requiredMaterialization: true);
+                                right = ToCoraxQuery(builderParameters, ne1.Expression, exact);
+                                TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged, requiredMaterialization: true);
                                 return indexSearcher.AndNot(right, left, token: builderParameters.Token);
                             }
 
                             if (@where.Right is TrueExpression)
                                 return right; // true and not... optimization
                             
-                            if (TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged, ref builderParameters.StreamingDisabled))
+                            if (TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged))
                                 return merged;
 
                             return indexSearcher.And(left, right);
 
                         case (_, NegatedExpression ne1):
-                            left = ToCoraxQuery(builderParameters, @where.Left, ref builderParameters.StreamingDisabled, exact);
+                            left = ToCoraxQuery(builderParameters, @where.Left, exact);
                             if (TryUseNegatedQuery(builderParameters, ne1, out right, exact) == false)
                             {
-                                right = ToCoraxQuery(builderParameters, ne1.Expression, ref builderParameters.StreamingDisabled, exact);
-                                TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged, ref builderParameters.StreamingDisabled,  requiredMaterialization: true);
+                                right = ToCoraxQuery(builderParameters, ne1.Expression, exact);
+                                TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged,  requiredMaterialization: true);
                                 return indexSearcher.AndNot(left, right, token: builderParameters.Token);
                             }
 
                             if (@where.Left is TrueExpression)
                                 return right; // true and not... optimization
 
-                            if (TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged, ref builderParameters.StreamingDisabled))
+                            if (TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged))
                                 return merged;
 
                             return indexSearcher.And(left, right);
 
 
                         default:
-                            left = ToCoraxQuery(builderParameters, @where.Left, ref streamingOptimization, exact);
-                            right = ToCoraxQuery(builderParameters, @where.Right, ref builderParameters.StreamingDisabled, exact);
+                            left = ToCoraxQuery(builderParameters, @where.Left,  exact);
+                            right = ToCoraxQuery(builderParameters, @where.Right, exact);
                             // in case of AND we can materialize only TermMatches, we push streamingOptimization there only for changing order for MultiTermMatch;
-                            if (left is CoraxBooleanItem cbi && streamingOptimization.TrySetAsStreamingField(builderParameters, cbi))
-                                left = cbi.Materialize(ref streamingOptimization); 
+                            if (left is CoraxBooleanItem cbi && builderParameters.StreamingDisabled.TrySetAsStreamingField(builderParameters, cbi))
+                                left = cbi.Materialize(ref builderParameters.StreamingDisabled); 
                             
-                            if (TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged, ref builderParameters.StreamingDisabled))
+                            if (TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out merged))
                                 return merged;
 
                             // When we do not optimize this node for streaming operation:.
                             // We don't want an unknown size multiterm match to be subject to this optimization. When faced with one that is unknown just execute as
                             // it was written in the query. If we don't have statistics the confidence will be Low, so the optimization wont happen.
                             //This was part of Corax's IndexSearcher optimization (https://github.com/ravendb/ravendb/blob/12b874c06a0003520cd8f188467488cdc526f96b/src/Corax/IndexSearcher/IndexSearcher.BinaryMatches.cs#L16C8-L19)
-                            if (streamingOptimization.OptimizationIsPossible == false && left.Count < right.Count && left.Confidence >= QueryCountConfidence.Normal)
+                            if (builderParameters.StreamingDisabled.OptimizationIsPossible == false && left.Count < right.Count && left.Confidence >= QueryCountConfidence.Normal)
                                 return indexSearcher.And(right, left, token: builderParameters.Token);
                             
                             return indexSearcher.And(left, right, token: builderParameters.Token);
@@ -389,9 +383,9 @@ public static class CoraxQueryBuilder
                 }
                 case OperatorType.Or:
                 {
-                    streamingOptimization.BinaryMatchTraversed();
-                    var left = ToCoraxQuery(builderParameters, @where.Left, ref builderParameters.StreamingDisabled, exact);
-                    var right = ToCoraxQuery(builderParameters, @where.Right, ref builderParameters.StreamingDisabled, exact);
+                    builderParameters.StreamingDisabled.BinaryMatchTraversed();
+                    var left = ToCoraxQuery(builderParameters, @where.Left,exact);
+                    var right = ToCoraxQuery(builderParameters, @where.Right, exact);
 
                     builderParameters.BuildSteps?.Add(
                         $"OR operator: left - {left.GetType().FullName} ({left}) assembly: {left.GetType().Assembly.FullName} assemby location: {left.GetType().Assembly.Location} , right - {right.GetType().FullName} ({right}) assemlby: {right.GetType().Assembly.FullName} assemby location: {right.GetType().Assembly.Location}");
@@ -400,7 +394,7 @@ public static class CoraxQueryBuilder
                     if (match.TryAddItem(left) && match.TryAddItem(right))
                         return match;
 
-                    TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out var _, ref builderParameters.StreamingDisabled, true);
+                    TryMergeTwoNodesForAnd(indexSearcher, builderParameters, ref left, ref right, out var _,  true);
 
                     return indexSearcher.Or(left, right, token: builderParameters.Token);
                 }
@@ -496,10 +490,10 @@ public static class CoraxQueryBuilder
             {
                 var newExpr = new BinaryExpression(new NegatedExpression(nbe.Left),
                     nbe.Right, nbe.Operator);
-                return ToCoraxQuery(builderParameters, newExpr, ref builderParameters.StreamingDisabled, exact);
+                return ToCoraxQuery(builderParameters, newExpr, exact);
             }
 
-            return ToCoraxQuery(builderParameters, ne.Expression, ref builderParameters.StreamingDisabled, exact);
+            return ToCoraxQuery(builderParameters, ne.Expression, exact);
         }
 
         if (expression is BetweenExpression be)
@@ -535,20 +529,20 @@ public static class CoraxQueryBuilder
                 case MethodType.Boost:
                     return HandleBoost(builderParameters, me, exact);
                 case MethodType.StartsWith:
-                    return HandleStartsWith(builderParameters, me, exact, ref streamingOptimization);
+                    return HandleStartsWith(builderParameters, me, exact);
                 case MethodType.EndsWith:
-                    return HandleEndsWith(builderParameters, me, exact, ref streamingOptimization);
+                    return HandleEndsWith(builderParameters, me, exact);
                 case MethodType.Exists:
-                    return HandleExists(builderParameters, me, ref streamingOptimization);
+                    return HandleExists(builderParameters, me);
                 case MethodType.Exact:
-                    return HandleExact(builderParameters, me, ref streamingOptimization, proximity);
+                    return HandleExact(builderParameters, me, proximity);
                 case MethodType.Spatial_Within:
                 case MethodType.Spatial_Contains:
                 case MethodType.Spatial_Disjoint:
                 case MethodType.Spatial_Intersects:
                     return HandleSpatial(builderParameters, me, methodType);
                 case MethodType.Regex:
-                    return HandleRegex(builderParameters, me, ref streamingOptimization);
+                    return HandleRegex(builderParameters, me);
                 case MethodType.MoreLikeThis:
                     return builderParameters.AllEntries.Replay();
                 default:
@@ -628,10 +622,10 @@ public static class CoraxQueryBuilder
         switch (methodType)
         {
             case MethodType.StartsWith:
-                match = HandleStartsWith(builderParameters, inner,  exact, ref builderParameters.StreamingDisabled, negated: true);
+                match = HandleStartsWith(builderParameters, inner,  exact, negated: true);
                 return true;
             case MethodType.EndsWith:
-                match = HandleEndsWith(builderParameters, inner,  exact, ref builderParameters.StreamingDisabled, negated: true);
+                match = HandleEndsWith(builderParameters, inner,  exact, negated: true);
                 return true;
             default:
                 goto NoOpt;
@@ -647,10 +641,10 @@ public static class CoraxQueryBuilder
         using (CultureHelper.EnsureInvariantCulture())
         {
             var filterQuery = BuildQuery(builderParameters, out _);
-            filterQuery = MaterializeWhenNeeded(builderParameters, filterQuery, ref builderParameters.StreamingDisabled);
+            filterQuery = MaterializeWhenNeeded(builderParameters, filterQuery);
 
             var moreLikeThisQuery = ToMoreLikeThisQuery(builderParameters, whereExpression, out var baseDocument, out var options);
-            moreLikeThisQuery = MaterializeWhenNeeded(builderParameters,moreLikeThisQuery, ref builderParameters.StreamingDisabled);
+            moreLikeThisQuery = MaterializeWhenNeeded(builderParameters,moreLikeThisQuery);
 
             return new MoreLikeThisQuery.MoreLikeThisQuery
             {
@@ -684,7 +678,7 @@ public static class CoraxQueryBuilder
 
         var firstArgument = moreLikeThisExpression.Arguments[0];
         if (firstArgument is BinaryExpression binaryExpression)
-            return ToCoraxQuery(builderParameters, binaryExpression, ref builderParameters.StreamingDisabled);
+            return ToCoraxQuery(builderParameters, binaryExpression);
 
         var firstArgumentValue = QueryBuilderHelper.GetValueAsString(QueryBuilderHelper.GetValue(metadata.Query, metadata, queryParameters, firstArgument).Value);
         if (bool.TryParse(firstArgumentValue, out var firstArgumentBool))
@@ -699,7 +693,7 @@ public static class CoraxQueryBuilder
         return null;
     }
 
-    private static bool TryMergeTwoNodesForAnd(IndexSearcher indexSearcher, Parameters parameters, ref IQueryMatch lhs, ref IQueryMatch rhs, out CoraxBooleanQueryBase merged, ref StreamingOptimization streamingOptimization, bool requiredMaterialization = false)
+    private static bool TryMergeTwoNodesForAnd(IndexSearcher indexSearcher, Parameters parameters, ref IQueryMatch lhs, ref IQueryMatch rhs, out CoraxBooleanQueryBase merged, bool requiredMaterialization = false)
     {
         merged = null;
         switch (lhs, rhs, requiredMaterialization)
@@ -744,20 +738,20 @@ public static class CoraxQueryBuilder
                 return false;
             default:
                 if (lhs is CoraxBooleanItem cbi)
-                    lhs = cbi.Materialize(ref streamingOptimization);
+                    lhs = cbi.Materialize(ref parameters.StreamingDisabled);
                 else if (lhs is CoraxBooleanQueryBase cbq)
                     lhs = cbq.Materialize();
                 if (rhs is CoraxBooleanItem cbi1)
-                    rhs = cbi1.Materialize(ref streamingOptimization);
+                    rhs = cbi1.Materialize(ref parameters.StreamingDisabled);
                 else if (rhs is CoraxBooleanQueryBase cbq1)
                     rhs = cbq1.Materialize();
                 return false;
         }
     }
 
-    private static IQueryMatch HandleExact(Parameters builderParameters, MethodExpression expression, ref StreamingOptimization streamingConfiguration, int? proximity = null)
+    private static IQueryMatch HandleExact(Parameters builderParameters, MethodExpression expression, int? proximity = null)
     {
-        return ToCoraxQuery(builderParameters, expression.Arguments[0], ref streamingConfiguration, exact: true, proximity);
+        return ToCoraxQuery(builderParameters, expression.Arguments[0], exact: true, proximity);
     }
 
     private static IQueryMatch TranslateBetweenQuery(Parameters builderParameters, BetweenExpression be, bool exact)
@@ -801,7 +795,7 @@ public static class CoraxQueryBuilder
         }
     }
 
-    private static IQueryMatch HandleExists(Parameters builderParameters, MethodExpression expression, ref StreamingOptimization streamingOptimization)
+    private static IQueryMatch HandleExists(Parameters builderParameters, MethodExpression expression)
     {
         var metadata = builderParameters.Metadata;
         var queryParameters = builderParameters.QueryParameters;
@@ -810,13 +804,13 @@ public static class CoraxQueryBuilder
         var fieldMetadata = QueryBuilderHelper.GetFieldMetadata(builderParameters.Allocator, fieldName, builderParameters.Index, builderParameters.IndexFieldsMapping,
             builderParameters.FieldsToFetch, builderParameters.HasDynamics, builderParameters.DynamicFields, hasBoost: builderParameters.HasBoost);
         
-        return streamingOptimization.TrySetMultiTermMatchAsStreamingField(builderParameters.IndexSearcher, fieldMetadata, MethodType.Exists) 
-            ? builderParameters.IndexSearcher.ExistsQuery(fieldMetadata, forward: streamingOptimization.Forward, streamingEnabled: true) 
+        return builderParameters.StreamingDisabled.TrySetMultiTermMatchAsStreamingField(builderParameters.IndexSearcher, fieldMetadata, MethodType.Exists) 
+            ? builderParameters.IndexSearcher.ExistsQuery(fieldMetadata, forward: builderParameters.StreamingDisabled.Forward, streamingEnabled: true) 
             : builderParameters.IndexSearcher.ExistsQuery(fieldMetadata);
         
     }
 
-    private static IQueryMatch HandleStartsWith(Parameters builderParameters, MethodExpression expression, bool exact, ref StreamingOptimization streamingOptimization,
+    private static IQueryMatch HandleStartsWith(Parameters builderParameters, MethodExpression expression, bool exact,
         bool negated = false)
     {
         var metadata = builderParameters.Metadata;
@@ -853,12 +847,12 @@ public static class CoraxQueryBuilder
         var fieldMetadata = QueryBuilderHelper.GetFieldMetadata(allocator, fieldName, index, indexFieldsMapping, fieldsToFetch, builderParameters.HasDynamics,
             builderParameters.DynamicFields, exact: exact, hasBoost: builderParameters.HasBoost);
 
-        return streamingOptimization.TrySetMultiTermMatchAsStreamingField(builderParameters.IndexSearcher, fieldMetadata, MethodType.StartsWith) 
-            ? builderParameters.IndexSearcher.StartWithQuery(fieldMetadata, valueAsString, forward: streamingOptimization.Forward, streamingEnabled: true, isNegated: negated) 
+        return builderParameters.StreamingDisabled.TrySetMultiTermMatchAsStreamingField(builderParameters.IndexSearcher, fieldMetadata, MethodType.StartsWith) 
+            ? builderParameters.IndexSearcher.StartWithQuery(fieldMetadata, valueAsString, forward: builderParameters.StreamingDisabled.Forward, streamingEnabled: true, isNegated: negated) 
             : builderParameters.IndexSearcher.StartWithQuery(fieldMetadata, valueAsString, isNegated: negated);
     }
 
-    private static MultiTermMatch HandleEndsWith(Parameters builderParameters, MethodExpression expression, bool exact, ref StreamingOptimization streamingOptimization,
+    private static MultiTermMatch HandleEndsWith(Parameters builderParameters, MethodExpression expression, bool exact,
         bool negated = false)
     {
         var indexSearcher = builderParameters.IndexSearcher;
@@ -898,8 +892,8 @@ public static class CoraxQueryBuilder
         var fieldMetadata = QueryBuilderHelper.GetFieldMetadata(allocator, fieldName, index, indexFieldsMapping, fieldsToFetch, builderParameters.HasDynamics,
             builderParameters.DynamicFields, exact: exact, hasBoost: builderParameters.HasBoost);
         
-        return streamingOptimization.TrySetMultiTermMatchAsStreamingField(builderParameters.IndexSearcher, fieldMetadata, MethodType.EndsWith) 
-            ? builderParameters.IndexSearcher.EndsWithQuery(fieldMetadata, valueAsString, forward: streamingOptimization.Forward, streamingEnabled: true, isNegated: negated) 
+        return builderParameters.StreamingDisabled.TrySetMultiTermMatchAsStreamingField(builderParameters.IndexSearcher, fieldMetadata, MethodType.EndsWith) 
+            ? builderParameters.IndexSearcher.EndsWithQuery(fieldMetadata, valueAsString, forward: builderParameters.StreamingDisabled.Forward, streamingEnabled: true, isNegated: negated) 
             : builderParameters.IndexSearcher.EndsWithQuery(fieldMetadata, valueAsString, isNegated: negated);
     }
 
@@ -945,7 +939,7 @@ public static class CoraxQueryBuilder
         }
 
 
-        var query = ToCoraxQuery(builderParameters, expression.Arguments[0], ref builderParameters.StreamingDisabled, exact);
+        var query = ToCoraxQuery(builderParameters, expression.Arguments[0], exact);
         
         switch (query)
         {
@@ -1209,7 +1203,7 @@ public static class CoraxQueryBuilder
         return builderParameters.IndexSearcher.SpatialQuery(fieldMetadata, distanceErrorPct, shape, spatialField.GetContext(), operation, token: builderParameters.Token);
     }
 
-    private static IQueryMatch HandleRegex(Parameters builderParameters, MethodExpression expression, ref StreamingOptimization streamingOptimization)
+    private static IQueryMatch HandleRegex(Parameters builderParameters, MethodExpression expression)
     {
         if (expression.Arguments.Count != 2)
             throw new ArgumentException(
@@ -1228,8 +1222,8 @@ public static class CoraxQueryBuilder
         var fieldMetadata = QueryBuilderHelper.GetFieldMetadata(builderParameters.Allocator, fieldName, builderParameters.Index, builderParameters.IndexFieldsMapping,
             builderParameters.FieldsToFetch, builderParameters.HasDynamics, builderParameters.DynamicFields, hasBoost: builderParameters.HasBoost);
 
-        return streamingOptimization.TrySetMultiTermMatchAsStreamingField(builderParameters.IndexSearcher, fieldMetadata, MethodType.Regex) 
-            ? builderParameters.IndexSearcher.RegexQuery(fieldMetadata, builderParameters.Factories.GetRegexFactory(valueAsString), streamingOptimization.Forward, streamingEnabled: true, token: builderParameters.Token) 
+        return builderParameters.StreamingDisabled.TrySetMultiTermMatchAsStreamingField(builderParameters.IndexSearcher, fieldMetadata, MethodType.Regex) 
+            ? builderParameters.IndexSearcher.RegexQuery(fieldMetadata, builderParameters.Factories.GetRegexFactory(valueAsString), builderParameters.StreamingDisabled.Forward, streamingEnabled: true, token: builderParameters.Token) 
             : builderParameters.IndexSearcher.RegexQuery(fieldMetadata, builderParameters.Factories.GetRegexFactory(valueAsString), token: builderParameters.Token);
 
         bool IsStringFamily(object value)

@@ -462,16 +462,22 @@ public class StreamingOptimization_QueryBuilder(ITestOutputHelper output) : Rave
             yield return new object[] {hasMultipleValues, leftInclusive, rightInclusive, isAscending};
         }
     }
-    
-    private async Task TestQueryBuilder<TExpectedForSingleValues>(bool hasMultipleValues, Func<IAsyncDocumentSession, IndexQuery> query)
+
+    private Task TestQueryBuilder<TExpectedForSingleValues>(bool hasMultipleValues, Func<IAsyncDocumentSession, IndexQuery> query)
     {
-        var (store, index, mapping, factories) = await GetDatabaseWithIndex();
+        return TestQueryBuilder<TExpectedForSingleValues, DtoIndexSingleValues>(this, hasMultipleValues, query);
+    }
+
+    public static async Task TestQueryBuilder<TExpectedForSingleValues, TIndex>(RavenTestBase self, bool hasMultipleValues, Func<IAsyncDocumentSession, IndexQuery> query) 
+        where TIndex : AbstractIndexCreationTask, new()
+    {
+        var (store, index, mapping, factories) = await GetDatabaseWithIndex<TIndex>(self);
         using var _ = store;
         using var context = JsonOperationContext.ShortTermSingleUse();
         var serializer = (JsonSerializer)store.Conventions.Serialization.CreateSerializer();
         {
             using var session = store.OpenAsyncSession();
-            var coraxQuery = GetCoraxQuery(query(session), index, context, serializer, mapping, factories, hasMultipleValues);
+            var coraxQuery = GetCoraxQuery(self, query(session), index, context, serializer, mapping, factories, hasMultipleValues);
 
             if (hasMultipleValues == false)
                 Assert.IsType<TExpectedForSingleValues>(coraxQuery);
@@ -480,11 +486,12 @@ public class StreamingOptimization_QueryBuilder(ITestOutputHelper output) : Rave
         }
     }
 
-    private async Task<(DocumentStore store, Index index, IndexFieldsMapping mapping, QueryBuilderFactories factories)> GetDatabaseWithIndex()
+    private static async Task<(DocumentStore store, Index index, IndexFieldsMapping mapping, QueryBuilderFactories factories)> GetDatabaseWithIndex<TIndex>(RavenTestBase self)
+        where TIndex : AbstractIndexCreationTask, new()
     {
-        var store = GetDocumentStore(Options.ForSearchEngine(RavenSearchEngineMode.Corax));
-        var db = await GetDatabase(store.Database);
-        var index = new DtoIndexSingleValues();
+        var store = self.GetDocumentStore(Options.ForSearchEngine(RavenSearchEngineMode.Corax));
+        var db = await self.GetDatabase(store.Database);
+        var index = new TIndex();
         await index.ExecuteAsync(store);
         var indexInstance = db.IndexStore.GetIndex(index.IndexName);
 
@@ -555,10 +562,11 @@ public class StreamingOptimization_QueryBuilder(ITestOutputHelper output) : Rave
         }
     }
 
-    private IQueryMatch GetCoraxQuery(IndexQuery indexQuery, Index index, JsonOperationContext context, JsonSerializer jsonSerializer, IndexFieldsMapping mapping,
+    private static IQueryMatch GetCoraxQuery(RavenTestBase self,
+        IndexQuery indexQuery, Index index, JsonOperationContext context, JsonSerializer jsonSerializer, IndexFieldsMapping mapping,
         QueryBuilderFactories queryBuilderFactories, bool hasMultipleTermsInField)
     {
-        using var env = new EnvTest(Output);
+        using var env = new EnvTest(self.Output);
         env.Init(mapping, hasMultipleTermsInField);
         using (var writer = new BlittableJsonWriter(context))
         {
