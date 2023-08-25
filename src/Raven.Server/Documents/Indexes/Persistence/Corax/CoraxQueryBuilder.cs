@@ -196,11 +196,12 @@ public static class CoraxQueryBuilder
                 break;
             case CoraxBooleanItem cbi:
                 if (builderParameters.StreamingDisabled.TrySetAsStreamingField(builderParameters, cbi) == false)
-                    return source;
+                    return cbi.Materialize(ref builderParameters.StreamingDisabled);
                 
                 if (builderParameters.StreamingDisabled.MatchedByCompoundField)
                     return cbi.OptimizeCompoundField(ref builderParameters.StreamingDisabled);
 
+                
                 source = cbi.Materialize(ref builderParameters.StreamingDisabled);
                 break;
         }

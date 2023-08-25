@@ -122,7 +122,7 @@ public class StreamingOptimization_QueryBuilder(ITestOutputHelper output) : Rave
 
     [Theory]
     [InlineData(true)]
-    [InlineData(false)] // where (Name = x and F < 1) and (S = 2 and F < 2 ) order by Name => skip order by
+    [InlineData(false)] // where (Name = x and F < 1) OR (S = 2 and F < 2 ) order by Name => cannot skip order By UNLESS other AST branch also filter on Name = x
     public async Task BinaryMatchOfBinaryMatchOr(bool hasMultipleValues) => await TestQueryBuilder<SortingMatch>(hasMultipleValues, session =>
         session.Advanced.AsyncDocumentQuery<Dto, DtoIndexSingleValues>()
             .OpenSubclause()
@@ -160,8 +160,8 @@ public class StreamingOptimization_QueryBuilder(ITestOutputHelper output) : Rave
 
     [Theory]
     [InlineData(true)]
-    [InlineData(false)] // where (Name = x and F < 1) and (S = 2 and F < 2 ) order by S => add sorting match
-    public async Task BinaryMatchOfBinaryMatchAndButSortOnDifferentField(bool hasMultipleValues) => await TestQueryBuilder<SortingMatch>(hasMultipleValues, session =>
+    [InlineData(false)] // where (Name = x and F < 1) and (S = 2 and F < 2 ) order by S => we can merge all subclauses into one, since there is S = 2 any other S values are not possible (in case where there is no hasMultipleValues).
+    public async Task BinaryMatchOfBinaryMatchAndButSortOnDifferentField(bool hasMultipleValues) => await TestQueryBuilder<BinaryMatch>(hasMultipleValues, session =>
         session.Advanced.AsyncDocumentQuery<Dto, DtoIndexSingleValues>()
             .OpenSubclause()
             .WhereEquals(p => p.Name, "maciej")
