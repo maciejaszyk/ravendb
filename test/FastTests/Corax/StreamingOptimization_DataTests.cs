@@ -58,14 +58,20 @@ public class StreamingOptimization_DataTests : RavenTestBase
     public void UnboundedRangeQueries(UnaryMatchOperation unaryMatchOperation, OrderingType fieldType, bool ascending, object value)
     {
         using var store = CreateDatabase(out List<Dto> actualDocuments);
-        using var session = store.OpenSession();
         var fieldName = fieldType switch
         {
             OrderingType.Double => nameof(Dto.DoubleValue),
             OrderingType.Long => nameof(Dto.LongValue),
             _ => nameof(Dto.Name)
         };
-
+        using (var autoIndexCreation = store.OpenSession())
+        {
+            autoIndexCreation.Advanced.DocumentQuery<Dto>().WhereEquals(fieldName, "0").WaitForNonStaleResults().ToList();
+            Indexes.WaitForIndexing(store);
+        }
+        
+        using var session = store.OpenSession();
+       
         object queriedValue = null;
         if (fieldType == OrderingType.Long)
             queriedValue = (long)value;
@@ -74,6 +80,8 @@ public class StreamingOptimization_DataTests : RavenTestBase
         if (fieldType is not (OrderingType.Double or OrderingType.Long))
             queriedValue = (string)value;
 
+        
+        
         var query = session.Advanced.DocumentQuery<Dto>()
             .WaitForNonStaleResults();
 
@@ -136,7 +144,23 @@ public class StreamingOptimization_DataTests : RavenTestBase
             (false, OrderingType.Double) => linqResults.OrderByDescending(i => i.DoubleValue),
             _ => throw new ArgumentOutOfRangeException()
         };
-        Assert.Equal(linqResults.Select(i => i.Id), serverResults.Select(i => i.Id));
+
+        try{   Assert.Equal(linqResults.Select(i => i.Id), serverResults.Select(i => i.Id));}
+        catch
+        {
+            foreach (var expectedOrder in serverResults)
+                Console.WriteLine(expectedOrder);
+
+            Console.WriteLine("____________________________________________________");
+            Console.WriteLine("LINQ");
+            foreach (var expectedOrder in linqResults)
+                Console.WriteLine(expectedOrder);
+
+            throw;
+        }
+            
+            
+     
     }
 
     [Fact]

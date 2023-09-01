@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using Corax.Queries;
+using Raven.Client.Documents.Session;
 using Tests.Infrastructure;
 using Raven.Server.Utils;
 using SlowTests.Sharding.Cluster;
@@ -19,19 +21,18 @@ public static class Program
     public static async Task Main(string[] args)
     {
         Console.WriteLine(Process.GetCurrentProcess().Id);
+        Console.WriteLine("Is 32: " + Sparrow.Platform.PlatformDetails.Is32Bits);
 
-        for (int i = 0; i < 1000; i++)
+        Parallel.For(0, 10_000, new ParallelOptions() {MaxDegreeOfParallelism = 4}, i =>
         {
             Console.WriteLine($"Starting to run {i}");
-
             try
             {
-                TryRemoveDatabasesFolder();
                 using (var testOutputHelper = new ConsoleTestOutputHelper())
-                using (var test = new ShardedClusterObserverTests(testOutputHelper))
+                using (var test = new FastTests.Corax.StreamingOptimization_DataTests(testOutputHelper))
                 {
                     DebuggerAttachedTimeout.DisableLongTimespan = true;
-                    await test.ClusterObserverWillSkipCommandIfChangingTheSameDatabaseRecordTwiceInOneIteration();
+                    test.UnboundedRangeQueries(UnaryMatchOperation.GreaterThan, OrderingType.Double, ascending: true, value: 2D);
                 }
             }
             catch (Exception e)
@@ -40,7 +41,7 @@ public static class Program
                 Console.WriteLine(e);
                 Console.ForegroundColor = ConsoleColor.White;
             }
-        }
+        });
     }
 
     private static void TryRemoveDatabasesFolder()

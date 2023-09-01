@@ -34,8 +34,12 @@ namespace FastTests.Corax;
 // b) In case of multiple terms per document -> assert if optimization doesn't happened
 
 
-public class StreamingOptimization_QueryBuilder(ITestOutputHelper output) : RavenTestBase(output)
+public class StreamingOptimization_QueryBuilder : RavenTestBase
 {
+    public StreamingOptimization_QueryBuilder(ITestOutputHelper output) : base(output)
+    {
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)] // TermMatch and asc order on same field with same type => can optimize
