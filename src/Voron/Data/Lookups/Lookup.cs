@@ -882,7 +882,8 @@ public sealed unsafe partial class Lookup<TLookupKey> : IPrepareForCommit
             
             if (state.Header->IsBranch) // we cannot allow a branch with a single element, steal another one
             {
-                DecodeEntry(ref state, state.Header->NumberOfEntries - 1, out var k, out var v);
+                var (k, v) = GetFirstActualKeyAndValue(state.Header);
+                
                 RemoveFromPage(allowRecurse: false, state.Header->NumberOfEntries - 1);
                 // the first item in a branch is always the smallest
                 var prevEntryLen = EncodeEntry(newPageState.Header, TLookupKey.MinValue, v, entryBufferPtr);
@@ -946,9 +947,11 @@ public sealed unsafe partial class Lookup<TLookupKey> : IPrepareForCommit
         long separatorKey = GetKeyData(ref newPageState, 0);
         if (newPageState.Header->IsBranch)
         {
+            var (kFirst, _) = GetFirstActualKeyAndValue(state.Header);
             // here we insert a minimum value as the first item of the branch
             var k = TLookupKey.FromLong<TLookupKey>(separatorKey);
             RemoveEntryFromPage(ref newPageState, ref k, 0, out var pageNum);
+            separatorKey = kFirst;
             var requiredSize = EncodeEntry(newPageState.Header, TLookupKey.MinValue, pageNum, entryBufferPtr);
             newPageState.LastSearchPosition = 0;
             AddEntryToPage(ref newPageState, requiredSize, entryBufferPtr, false);
