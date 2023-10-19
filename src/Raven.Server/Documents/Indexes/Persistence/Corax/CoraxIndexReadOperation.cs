@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -116,7 +116,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
             void Initialize(IndexQueryServerSide query, QueryTimingsScope scope);
             void Setup(IndexQueryServerSide query, DocumentsOperationContext context);
 
-            Dictionary<string, Dictionary<string, string[]>> Execute(IndexQueryServerSide query, DocumentsOperationContext context, IndexFieldsMapping fieldMappings, Document document);
+            Dictionary<string, Dictionary<string, string[]>> Execute(IndexQueryServerSide query, DocumentsOperationContext context, IndexFieldsMapping fieldMappings, ref EntryTermsReader entryReader, FieldsToFetch highlightingFields, Document document);
         }
 
         private struct NoHighlighting : ISupportsHighlighting
@@ -128,7 +128,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
 
             public Dictionary<string, Dictionary<string, string[]>> Execute(
                 IndexQueryServerSide query, DocumentsOperationContext context,
-                IndexFieldsMapping fieldMappings, Document document)
+                IndexFieldsMapping fieldMappings, ref EntryTermsReader entryReader, FieldsToFetch highlightingFields, Document document)
                 => null;
         }
 
@@ -217,7 +217,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                 }
             }
 
-            public Dictionary<string, Dictionary<string, string[]>> Execute(IndexQueryServerSide query, DocumentsOperationContext context, IndexFieldsMapping fieldMappings, Document document)
+            public Dictionary<string, Dictionary<string, string[]>> Execute(IndexQueryServerSide query, DocumentsOperationContext context, IndexFieldsMapping fieldMappings, ref EntryTermsReader entryReader, FieldsToFetch highlightingFields, Document document)
             {
                 using (_timingsScope?.For(nameof(QueryTimingsScope.Names.Fill)))
                 {
@@ -689,7 +689,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                         var fetchedDocument = retriever.Get(ref retrieverInput, token);
                         if (fetchedDocument.Document != null)
                         {
-                            var qr = CreateQueryResult(ref identityTracker, fetchedDocument.Document, query, documentsContext, indexEntryId, orderByFields, ref highlightings, skippedResults, ref hasProjections, ref markedAsSkipped);
+                            var qr = CreateQueryResult(ref identityTracker, fetchedDocument.Document, query, documentsContext, ref entryTermsReader, fieldsToFetch, orderByFields, ref highlightings, skippedResults, ref hasProjections, ref markedAsSkipped);
                             if (qr.Result is null)
                             {
                                 docsToLoad++;
@@ -702,7 +702,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                         {
                             foreach (Document item in fetchedDocument.List)
                             {
-                                var qr = CreateQueryResult(ref identityTracker, item, query, documentsContext, indexEntryId, orderByFields, ref highlightings, skippedResults, ref hasProjections, ref markedAsSkipped);
+                                var qr = CreateQueryResult(ref identityTracker, item, query, documentsContext, ref entryTermsReader, fieldsToFetch, orderByFields, ref highlightings, skippedResults, ref hasProjections, ref markedAsSkipped);
                                 if (qr.Result is null)
                                 {
                                     docsToLoad++;
@@ -793,7 +793,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
         }
 
         protected virtual QueryResult CreateQueryResult<TDistinct, THasProjection, THighlighting>(ref IdentityTracker<TDistinct> tracker, Document document,
-            IndexQueryServerSide query, DocumentsOperationContext documentsContext, long indexEntryId, OrderMetadata[] orderByFields, ref THighlighting highlightings,
+            IndexQueryServerSide query, DocumentsOperationContext documentsContext, ref EntryTermsReader entryReader, FieldsToFetch highlightingFields, OrderMetadata[] orderByFields, ref THighlighting highlightings,
             Reference<long> skippedResults,
             ref THasProjection hasProjections, ref bool markedAsSkipped)
             where TDistinct : struct, IHasDistinct
@@ -816,7 +816,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
             return new QueryResult
             {
                 Result = document,
-                Highlightings = highlightings.Execute(query, documentsContext, _fieldMappings, document),
+                Highlightings = highlightings.Execute(query, documentsContext, _fieldMappings, ref entryReader, highlightingFields, document),
             };
         }
 
