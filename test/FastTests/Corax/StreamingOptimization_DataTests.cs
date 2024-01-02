@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using Corax.Querying.Matches;
 using Raven.Client.Documents;
 using Raven.Client.Documents.Session;
+using Raven.Server;
+using Raven.Server.Documents.Indexes.Persistence.Corax;
 using Sparrow;
 using Tests.Infrastructure;
 using Xunit;
@@ -16,6 +20,7 @@ public class StreamingOptimization_DataTests : RavenTestBase
 {
     public StreamingOptimization_DataTests(ITestOutputHelper output) : base(output)
     {
+        
     }
     private record Dto(string Name, long LongValue, double DoubleValue, string Id = null);
 
@@ -52,11 +57,17 @@ public class StreamingOptimization_DataTests : RavenTestBase
             yield return new object[] {unaryOperation, fieldType, isAscending, value};
         }
     }
-
+    private static int countCatch = 0;
+    private static object lockObject = new object();
+    
     [Theory]
     [MemberData(nameof(UnboundedRange))]
     public void UnboundedRangeQueries(UnaryMatchOperation unaryMatchOperation, OrderingType fieldType, bool ascending, object value)
     {
+        if (countCatch > 0)
+            Thread.Sleep(TimeSpan.FromMinutes(10));
+        
+        
         using var store = CreateDatabase(out List<Dto> actualDocuments);
         using var session = store.OpenSession();
         var fieldName = fieldType switch
@@ -136,8 +147,27 @@ public class StreamingOptimization_DataTests : RavenTestBase
             (false, OrderingType.Double) => linqResults.OrderByDescending(i => i.DoubleValue),
             _ => throw new ArgumentOutOfRangeException()
         };
-        Assert.Equal(linqResults.Select(i => i.Id), serverResults.Select(i => i.Id));
-    }
+        try
+        {
+            Assert.Equal(linqResults.Select(i => i.Id), serverResults.Select(i => i.Id));
+        }
+        catch
+        {
+            int previousCount = Interlocked.Increment(ref countCatch);
+            Console.WriteLine($"PATH: {_path}");
+            foreach (var expectedOrder in serverResults)
+                Console.WriteLine(expectedOrder);
+
+            Console.WriteLine("____________________________________________________");
+            Console.WriteLine("LINQ");
+            foreach (var expectedOrder in linqResults)
+                Console.WriteLine(expectedOrder);
+//            Debugger.Break();
+            WaitForUserToContinueTheTest(store, debug: false);
+            
+            
+            throw;
+        }    }
 
     [Fact]
     public void AscendingStartsWithStreamingReturnsGoodOrder()
@@ -376,11 +406,16 @@ public class StreamingOptimization_DataTests : RavenTestBase
             yield return new object[] {leftInclusive, rightInclusive, isAscending, fieldType};
         }
     }
-    
+
+    private string _path;
     
     private IDocumentStore CreateDatabase(out List<Dto> documents)
     {
-        var store = GetDocumentStore(Options.ForSearchEngine(RavenSearchEngineMode.Corax));
+        var options = Options.ForSearchEngine(RavenSearchEngineMode.Corax);
+        // _path = NewDataPath();
+        // options.Path = _path;
+        // options.RunInMemory = false;
+        var store = GetDocumentStore(options);
 
         documents = new();
         documents.Add(new Dto("aaaaa", -5, -2.5));

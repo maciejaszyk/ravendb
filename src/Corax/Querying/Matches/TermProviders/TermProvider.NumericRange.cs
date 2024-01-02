@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Corax.Mappings;
 using Corax.Querying.Matches.Meta;
+using Corax.Utils;
 using Sparrow.Extensions;
 using Voron.Data.Lookups;
 using Range = Corax.Querying.Matches.Meta.Range;
@@ -26,7 +27,7 @@ namespace Corax.Querying.Matches.TermProviders
         private bool _includeLastTerm = true;
         private bool _isEmpty;
 
-        public TermNumericRangeProvider(Querying.IndexSearcher searcher, Lookup<TVal> set, FieldMetadata field, TVal low, TVal high)
+        public unsafe TermNumericRangeProvider(Querying.IndexSearcher searcher, Lookup<TVal> set, FieldMetadata field, TVal low, TVal high)
         {
             _searcher = searcher;
             _field = field;
@@ -34,6 +35,15 @@ namespace Corax.Querying.Matches.TermProviders
             _low = low;
             _high = high;
 
+            // if (false && typeof(TVal) == typeof(DoubleLookupKey))
+            // {
+            //     var lowAsByteArray = ((DoubleLookupKey)(object)low).Value;
+            //     var highAsByteArray = ((DoubleLookupKey)(object)high).Value;
+            //     var ptrLow = new Span<byte>((byte*)(&lowAsByteArray), sizeof(double)/sizeof(byte));
+            //     var ptrHigh = new Span<byte>((byte*)(&highAsByteArray), sizeof(double)/sizeof(byte));
+            //     Console.WriteLine($"L: {low} ({string.Join(", ", ptrLow.ToArray())}) | L: {high} ({string.Join(", ", ptrHigh.ToArray())})");
+            // }
+            
             //Unbounded query can skip checking range after first element (since we're taking ALL possible results from starting point)
             _skipRangeCheck = _iterator.IsForward switch
             {
@@ -60,13 +70,25 @@ namespace Corax.Querying.Matches.TermProviders
                 return;
             }
 
-            var skipFirst = _iterator.IsForward switch
+            bool skipFirst = false;
+            if (_iterator.IsForward && typeof(TLow) == typeof(Range.Exclusive) && key.IsEqual(_low))
             {
-                true when typeof(TLow) == typeof(Range.Exclusive) && key.IsEqual(_low) => true,
-                false when typeof(THigh) == typeof(Range.Exclusive) && _high.CompareTo(key) <= 0 => true,
-                false when typeof(THigh) == typeof(Range.Inclusive) && _high.CompareTo(key) < 0 => true,
-                _ => false
-            };
+                skipFirst = true;
+            } else if (_iterator.IsForward == false)
+            {
+                if ((typeof(THigh) == typeof(Range.Exclusive) && _high.CompareTo(key) <= 0) || typeof(THigh) == typeof(Range.Inclusive) && _high.CompareTo(key) < 0)
+                {
+                    skipFirst = true;
+                }
+            }
+
+            // var skipFirst = _iterator.IsForward switch
+            // {
+            //     true when typeof(TLow) == typeof(Range.Exclusive) && key.IsEqual(_low) => true,
+            //     false when typeof(THigh) == typeof(Range.Exclusive) && _high.CompareTo(key) <= 0 => true,
+            //     false when typeof(THigh) == typeof(Range.Inclusive) && _high.CompareTo(key) < 0 => true,
+            //     _ => false
+            // };
 
             if (skipFirst)
             {

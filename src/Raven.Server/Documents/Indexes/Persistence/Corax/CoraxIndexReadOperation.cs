@@ -670,6 +670,15 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
 
                     // We look for items that was haven't seen before in the case of paging. 
                     int read = queryMatch.Fill(ids);
+                    if (read == 6)
+                    {
+                        Console.BackgroundColor = ConsoleColor.Red;
+                        while (true)
+                        {
+                            Thread.Sleep(TimeSpan.FromSeconds(25));
+                            Console.WriteLine("Ping...");
+                        }
+                    }
                     if (read == 0)
                         goto Done;
 

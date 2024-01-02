@@ -3300,7 +3300,7 @@ namespace Raven.Server.Documents.Indexes
             where TQueryResult : QueryResultServerSide<Document>
         {
             QueryInternalPreparation(query);
-
+            token = OperationCancelToken.None;
             QueryRunner.AssertValidQuery(query, resultToFill);
 
             using (var marker = MarkQueryAsRunning(query))
