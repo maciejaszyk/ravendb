@@ -14,6 +14,12 @@ internal static class DocumentationUrls
 
             ///<remarks><seealso ref="https://ravendb.net/docs/article-page/6.0/csharp/client-api/session/querying/text-search/highlight-query-results"/></remarks>
             public const string HighlightQueryResults = nameof(HighlightQueryResults);
+
+            ///<remarks><seealso ref="https://ravendb.net/docs/article-page/6.0/csharp/client-api/session/querying/how-to-stream-query-results"/></remarks>
+            public const string StreamingQuery = nameof(StreamingQuery);
+
+            /// <remarks><seealso ref="https://ravendb.net/docs/article-page/6.0/Csharp/client-api/session/querying/sort-query-results#order-by-score"/></remarks>
+            public const string BoostingOrdering = nameof(BoostingOrdering);
         }
     }
 }

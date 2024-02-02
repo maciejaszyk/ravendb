@@ -970,9 +970,9 @@ namespace Raven.Client.Documents
             return Search(self, fieldSelector, termToSearch, boost, options, @operator);
         }
 
-        /// <summary>
-        /// Perform an initial sort by lucene score.
-        /// </summary>
+        /// <inheritdoc cref="IDocumentQueryBase{T, TSelf}.OrderByScore"/>
+        /// <typeparam name="T">The type of element of self</typeparam>
+        /// <param name="self">The <see cref="IQueryable{T}"/> to search on</param>
         public static IOrderedQueryable<T> OrderByScore<T>(this IQueryable<T> self)
         {
             var currentMethod = typeof(LinqExtensions).GetMethod(nameof(OrderByScore));
@@ -984,9 +984,9 @@ namespace Raven.Client.Documents
             return (IOrderedQueryable<T>)queryable;
         }
 
-        /// <summary>
-        /// Perform an initial sort by lucene score.
-        /// </summary>
+        /// <inheritdoc cref="IDocumentQueryBase{T, TSelf}.OrderByScore"/>
+        /// <typeparam name="T">The type of element of self</typeparam>
+        /// <param name="self">The <see cref="IOrderedQueryable{T}"/> to search on</param>
         public static IOrderedQueryable<T> ThenByScore<T>(this IOrderedQueryable<T> self)
         {
             var currentMethod = typeof(LinqExtensions).GetMethod(nameof(ThenByScore));
@@ -998,9 +998,9 @@ namespace Raven.Client.Documents
             return (IOrderedQueryable<T>)queryable;
         }
 
-        /// <summary>
-        /// Perform an initial sort by lucene score descending.
-        /// </summary>
+        /// <inheritdoc cref="IDocumentQueryBase{T, TSelf}.OrderByScoreDescending"/>
+        /// <typeparam name="T">The type of element of self</typeparam>
+        /// <param name="self">The <see cref="IQueryable{T}"/> to search on</param>
         public static IOrderedQueryable<T> OrderByScoreDescending<T>(this IQueryable<T> self)
         {
             var currentMethod = typeof(LinqExtensions).GetMethod(nameof(OrderByScoreDescending));
@@ -1012,9 +1012,9 @@ namespace Raven.Client.Documents
             return (IOrderedQueryable<T>)queryable;
         }
 
-        /// <summary>
-        /// Perform an initial sort by lucene score descending.
-        /// </summary>
+        /// <inheritdoc cref="IDocumentQueryBase{T, TSelf}.OrderByScoreDescending"/>
+        /// <typeparam name="T">The type of element of self</typeparam>
+        /// <param name="self">The <see cref="IOrderedQueryable{T}"/> to search on</param>
         public static IOrderedQueryable<T> ThenByScoreDescending<T>(this IOrderedQueryable<T> self)
         {
             var currentMethod = typeof(LinqExtensions).GetMethod(nameof(ThenByScoreDescending));
@@ -1026,18 +1026,15 @@ namespace Raven.Client.Documents
             return (IOrderedQueryable<T>)queryable;
         }
 
-        /// <summary>
-        /// Returns the query results as a stream
-        /// </summary>
+        /// <inheritdoc cref="ToStreamAsync{T}(System.Linq.IQueryable{T},System.IO.Stream,System.Threading.CancellationToken)"/>
         public static void ToStream<T>(this IQueryable<T> self, Stream stream)
         {
             var queryProvider = (IRavenQueryProvider)self.Provider;
             var docQuery = queryProvider.ToDocumentQuery<T>(self.Expression);
             ToStream(docQuery, stream);
         }
-        /// <summary> 
-        /// Returns the query results as a stream
-        /// </summary>
+
+        /// <inheritdoc cref="ToStreamAsync{T}(System.Linq.IQueryable{T},System.IO.Stream,System.Threading.CancellationToken)"/>
         public static void ToStream<T>(this IDocumentQuery<T> self, Stream stream)
         {
             var documentQuery = (DocumentQuery<T>)self;
@@ -1046,8 +1043,13 @@ namespace Raven.Client.Documents
         }
 
         /// <summary>
-        /// Returns the query results as a stream
+        /// Returns the query results as a stream. Streaming is useful when processing a large number of results.
         /// </summary>
+        /// <typeparam name="T">Results type</typeparam>
+        /// <param name="self">Query object</param>
+        /// <param name="stream">Stream where data will be written</param>
+        /// <param name="token">CancellationToken to cancel the streaming operation</param>
+        /// <inheritdoc cref="DocumentationUrls.Session.Querying.StreamingQuery"/>
         public static async Task ToStreamAsync<T>(this IQueryable<T> self, Stream stream, CancellationToken token = default)
         {
             var queryProvider = (IRavenQueryProvider)self.Provider;
@@ -1055,9 +1057,7 @@ namespace Raven.Client.Documents
             await ToStreamAsync(docQuery, stream, token).ConfigureAwait(false);
         }
 
-        /// <summary>
-        /// Returns the query results as a stream
-        /// </summary>
+        /// <inheritdoc cref="ToStreamAsync{T}(System.Linq.IQueryable{T},System.IO.Stream,System.Threading.CancellationToken)"/>
         public static async Task ToStreamAsync<T>(this IAsyncDocumentQuery<T> self, Stream stream, CancellationToken token = default)
         {
             var documentQuery = (AbstractDocumentQuery<T, AsyncDocumentQuery<T>>)self;

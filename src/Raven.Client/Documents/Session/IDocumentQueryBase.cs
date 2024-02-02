@@ -586,11 +586,10 @@ If you really want to do in memory filtering on the data returned from the query
         /// <summary>
         ///     Adds an ordering by score for a specific field to the query
         /// </summary>
+        /// <inheritdoc cref="DocumentationUrls.Session.Querying.BoostingOrdering"/>
         TSelf OrderByScore();
 
-        /// <summary>
-        ///     Adds an ordering by score for a specific field to the query
-        /// </summary>
+        /// <inheritdoc cref="OrderByScore"/>
         TSelf OrderByScoreDescending();
 
         /// <summary>
