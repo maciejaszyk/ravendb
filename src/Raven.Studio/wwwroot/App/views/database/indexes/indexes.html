@@ -381,12 +381,22 @@
                         </div>
                     </div>
                 </div>
+                <div class="properties-item referenced-collections" data-bind="">
+                    <div class="properties-value value-only">
+                        <div class="set-size">
+                            <i class="icon-documents"></i><span>NUM referenced collections</span>
+                        </div>
+                    </div>
+                </div>
                 <div class="properties-item text-success staleness" data-bind="visible: !isStale()">
                     <div class="properties-value value-only">
                         <div class="set-size">
                             <i class="icon-check"></i><span>Up to date</span>
                         </div>
                     </div>
+                </div>
+                <div class="properties-item placeholder" data-bind="visible: errorsCount()">
+                    <div class="properties-value value-only"></div>
                 </div>
                 <div class="properties-item errors" data-bind="visible: errorsCount()">
                     <div class="properties-value value-only">
