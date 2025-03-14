@@ -243,7 +243,7 @@ namespace Sparrow.Json.Parsing
                 _currentStateBuffer = null;
             }
 
-            _elements.WeakClear();
+            _elements.Clear();
             _seenValues.Clear();
 
             if (root != null)
