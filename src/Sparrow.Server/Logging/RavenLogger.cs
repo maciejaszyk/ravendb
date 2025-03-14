@@ -14,17 +14,17 @@ public sealed class RavenLogger : IRavenLogger
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public bool IsErrorEnabled => _logger.IsErrorEnabled;
+    public bool IsErrorEnabled => false;
 
-    public bool IsInfoEnabled => _logger.IsInfoEnabled;
+    public bool IsInfoEnabled => false;
 
-    public bool IsDebugEnabled => _logger.IsDebugEnabled;
+    public bool IsDebugEnabled => false;
 
-    public bool IsFatalEnabled => _logger.IsFatalEnabled;
+    public bool IsFatalEnabled => false;
 
-    public bool IsTraceEnabled => _logger.IsTraceEnabled;
+    public bool IsTraceEnabled => false;
 
-    public bool IsWarnEnabled => _logger.IsWarnEnabled;
+    public bool IsWarnEnabled => false;
 
     public void Error(string message)
     {
