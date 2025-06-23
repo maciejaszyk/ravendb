@@ -138,6 +138,28 @@ internal sealed class ShardedQueriesHandlerProcessorForGet : AbstractQueriesHand
         }
     }
 
+    protected override async Task<QueryResultServerSide<BlittableJsonReaderObject>> GetQueryResultsTaskAsync(IndexQueryServerSide query, TransactionOperationContext queryContext, long? existingResultEtag, bool metadataOnly,
+        OperationCancelToken token)
+    {
+        using (var timings = Timings(query))
+        {
+            var indexName = AbstractQueryRunner.GetIndexName(query);
+
+            using (RequestHandler.DatabaseContext.QueryRunner.MarkQueryAsRunning(indexName, query, token))
+            {
+                var queryProcessor = new ShardedQueryProcessor(queryContext, RequestHandler, query, existingResultEtag, metadataOnly, token.Token);
+
+                await queryProcessor.InitializeAsync();
+
+                var result = await queryProcessor.ExecuteShardedOperations(timings.Scope);
+
+                result.DurationInMs = timings.Duration;
+
+                return result;
+            }
+        }
+    }
+
     protected override void AssertIndexQuery(IndexQueryServerSide indexQuery)
     {
         if (indexQuery.Diagnostics != null)

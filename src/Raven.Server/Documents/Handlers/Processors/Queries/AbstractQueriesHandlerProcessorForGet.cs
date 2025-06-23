@@ -90,6 +90,10 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
 
     protected abstract ValueTask<QueryResultServerSide<TQueryResult>> GetQueryResultsAsync(IndexQueryServerSide query, TQueryContext queryContext, long? existingResultEtag,
         bool metadataOnly,
+        OperationCancelToken token);    
+    
+    protected abstract Task<QueryResultServerSide<TQueryResult>> GetQueryResultsTaskAsync(IndexQueryServerSide query, TQueryContext queryContext, long? existingResultEtag,
+        bool metadataOnly,
         OperationCancelToken token);
 
     protected override HttpMethod QueryMethod { get; }
@@ -221,7 +225,132 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
             }
         }
     }
+    
+    public async Task ExecuteAsTaskAsync()
+    {
+        using (AllocateContextForQueryOperation(out var queryContext, out var context))
+        using (var tracker = CreateRequestTimeTracker())
+        {
+            try
+            {
+                using (var token = RequestHandler.CreateHttpRequestBoundTimeLimitedOperationTokenForQuery())
+                {
+                    var parameters = QueryStringParameters.Create(HttpContext.Request);
+                    var indexQuery = await GetIndexQueryAsync(context, QueryMethod, tracker, parameters.AddSpatialProperties);
 
+                    indexQuery.Diagnostics = parameters.Diagnostics ? new List<string>() : null;
+                    indexQuery.AddTimeSeriesNames = parameters.AddTimeSeriesNames;
+                    indexQuery.DisableAutoIndexCreation = parameters.DisableAutoIndexCreation;
+
+                    if (RequestHandler.HttpContext.Request.IsFromOrchestrator())
+                        indexQuery.ReturnOptions = IndexQueryServerSide.QueryResultReturnOptions.CreateForSharding(indexQuery);
+
+                    AssertIndexQuery(indexQuery);
+
+                    var existingResultEtag = RequestHandler.GetLongFromHeaders(Constants.Headers.IfNoneMatch);
+
+                    EnsureQueryContextInitialized(queryContext, indexQuery);
+
+                    if (string.IsNullOrWhiteSpace(parameters.Debug) == false)
+                    {
+                        await HandleDebugAsync(indexQuery, queryContext, context, parameters, existingResultEtag, token);
+                        return;
+                    }
+
+                    if (TrafficWatchManager.HasRegisteredClients)
+                        RequestHandler.TrafficWatchQuery(indexQuery);
+
+                    if (indexQuery.Metadata.HasFacet)
+                    {
+                        await HandleFacetedQueryAsync(indexQuery, queryContext, context, existingResultEtag, token);
+                        return;
+                    }
+
+                    if (indexQuery.Metadata.HasSuggest)
+                    {
+                        await HandleSuggestQueryAsync(indexQuery, queryContext, context, existingResultEtag, token);
+                        return;
+                    }
+
+                    QueryResultServerSide<TQueryResult> result = null;
+                    try
+                    {
+                        result = await GetQueryResultsTaskAsync(indexQuery, queryContext, existingResultEtag, parameters.MetadataOnly, token);
+                    }
+                    catch (IndexDoesNotExistException)
+                    {
+                        result?.Dispose();
+                        HttpContext.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                        return;
+                    }
+                    catch (Exception)
+                    {
+                        result?.Dispose();
+                        throw;
+                    }
+
+                    using (result)
+                    {
+                        if (result.NotModified)
+                        {
+                            HttpContext.Response.StatusCode = (int)HttpStatusCode.NotModified;
+                            return;
+                        }
+
+                        HttpContext.Response.Headers[Constants.Headers.Etag] = CharExtensions.ToInvariantString(result.ResultEtag);
+
+                        long numberOfResults;
+                        long totalDocumentsSizeInBytes;
+                        await using (var writer = new AsyncBlittableJsonTextWriter(context, RequestHandler.ResponseBodyStream(), token.Token))
+                        {
+                            result.Timings = indexQuery.Timings?.ToTimings();
+
+                            (numberOfResults, totalDocumentsSizeInBytes) = await writer.WriteDocumentQueryResultAsync(context, result, parameters.MetadataOnly,
+                                WriteAdditionalData(indexQuery, parameters.IncludeServerSideQuery), token.Token);
+                            await writer.MaybeOuterFlushAsync();
+                        }
+
+
+                        QueryMetadataCache.MaybeAddToCache(indexQuery.Metadata, result.IndexName);
+
+                        if (RequestHandler.ShouldAddPagingPerformanceHint(numberOfResults))
+                        {
+                            RequestHandler.AddPagingPerformanceHint(PagingOperationType.Queries, $"Query ({result.IndexName})",
+                                $"{indexQuery.Metadata.QueryText}\n{indexQuery.QueryParameters}", numberOfResults, indexQuery.PageSize, result.DurationInMs,
+                                totalDocumentsSizeInBytes);
+                        }
+
+                        AddQueryTimingsToTrafficWatch(indexQuery);
+                    }
+
+                    tracker.Dispose();
+                }
+            }
+            catch (Exception e)
+            {
+                if (tracker.Query == null)
+                {
+                    string errorMessage;
+                    if (e is EndOfStreamException || e is ArgumentException)
+                    {
+                        errorMessage = $"Failed: {e.Message}";
+                    }
+                    else
+                    {
+                        errorMessage = $"Failed: {HttpContext.Request.Path.Value} {e}";
+                    }
+
+                    tracker.Query = errorMessage;
+
+                    if (TrafficWatchManager.HasRegisteredClients)
+                        RequestHandler.AddStringToHttpContext(errorMessage, TrafficWatchChangeType.Queries);
+                }
+
+                throw;
+            }
+        }
+    }
+    
     protected virtual void AssertIndexQuery(IndexQueryServerSide indexQuery)
     {
     }

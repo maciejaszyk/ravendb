@@ -14,13 +14,22 @@ namespace Raven.Server.Documents.Handlers
                 await processor.ExecuteAsync().ConfigureAwait(false);
         }
 
+        // [RavenAction("/databases/*/queries", "GET", AuthorizationStatus.ValidUser, EndpointType.Read, DisableOnCpuCreditsExhaustion = true)]
+        // public async Task Get()
+        // {
+        //     using (var processor = new DatabaseQueriesHandlerProcessorForGet(this, HttpMethod.Get))
+        //         await processor.ExecuteAsync().ConfigureAwait(false);
+        // }
+
+        
         [RavenAction("/databases/*/queries", "GET", AuthorizationStatus.ValidUser, EndpointType.Read, DisableOnCpuCreditsExhaustion = true)]
         public async Task Get()
         {
             using (var processor = new DatabaseQueriesHandlerProcessorForGet(this, HttpMethod.Get))
-                await processor.ExecuteAsync().ConfigureAwait(false);
+                await processor.ExecuteAsTaskAsync();
         }
 
+        
         [RavenAction("/databases/*/queries", "PATCH", AuthorizationStatus.ValidUser, EndpointType.Write, DisableOnCpuCreditsExhaustion = true)]
         public async Task Patch()
         {
