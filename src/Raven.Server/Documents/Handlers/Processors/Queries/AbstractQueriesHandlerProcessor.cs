@@ -41,7 +41,7 @@ internal abstract class AbstractQueriesHandlerProcessor<TRequestHandler, TOperat
         return new RequestTimeTracker(HttpContext, Logger, NotificationCenter, Configuration, "Query");
     }
 
-    public async ValueTask<IndexQueryServerSide> GetIndexQueryAsync(JsonOperationContext context, HttpMethod method, RequestTimeTracker tracker, bool addSpatialProperties = false)
+    public async Task<IndexQueryServerSide> GetIndexQueryAsync(JsonOperationContext context, HttpMethod method, RequestTimeTracker tracker, bool addSpatialProperties = false)
     {
         if (method == HttpMethod.Get)
             return await ReadIndexQueryAsync(context, tracker, addSpatialProperties);
