@@ -19,7 +19,7 @@ namespace EmbeddedTests
 
         private readonly ConcurrentSet<string> _localPathsToDelete = new ConcurrentSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        protected string NewDataPath([CallerMemberName] string caller = null)
+        protected string NewDataPath([CallerMemberName] string caller = "")
         {
             var path = $".\\Databases\\{caller ?? "TestPath"}.{Interlocked.Increment(ref _pathCount)}";
             if (PosixHelper.RunningOnPosix)

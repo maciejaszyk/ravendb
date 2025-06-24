@@ -439,7 +439,7 @@ namespace SlowTests.Server.Documents.PeriodicBackup.Restore
             }
         }
 
-        public S3Settings GetS3Settings(string subPath = null, [CallerMemberName] string caller = null)
+        public S3Settings GetS3Settings(string subPath = null, [CallerMemberName] string caller = "")
         {
             var s3Settings = _isCustom ? CustomS3RetryFactAttribute.S3Settings : AmazonS3RetryFactAttribute.S3Settings;
             if (s3Settings == null)

@@ -194,7 +194,7 @@ namespace SlowTests.Server.Documents.PeriodicBackup
             public AzureSettings Settings { get; set; }
             private readonly string _remoteFolder;
 
-            public AzureClientHolder(AzureSettings setting, Progress progress = null, [CallerMemberName] string caller = null)
+            public AzureClientHolder(AzureSettings setting, Progress progress = null, [CallerMemberName] string caller = "")
             {
                 Assert.False(string.IsNullOrEmpty(setting.StorageContainer), "string.IsNullOrEmpty(setting.StorageContainer)");
                 Settings = setting;

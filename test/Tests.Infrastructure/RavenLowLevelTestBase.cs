@@ -55,7 +55,7 @@ namespace FastTests
                 dictionary[RavenConfiguration.GetKey(x => x.Indexing.AutoIndexingEngineType)] = config.SearchEngine.ToString());
         }
         
-        protected DocumentDatabase CreateDocumentDatabase([CallerMemberName] string caller = null, bool runInMemory = true, string dataDirectory = null, Action<Dictionary<string, string>> modifyConfiguration = null)
+        protected DocumentDatabase CreateDocumentDatabase([CallerMemberName] string caller = "", bool runInMemory = true, string dataDirectory = null, Action<Dictionary<string, string>> modifyConfiguration = null)
         {
             var name = GetDatabaseName(caller);
 

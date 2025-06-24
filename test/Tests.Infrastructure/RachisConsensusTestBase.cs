@@ -67,7 +67,7 @@ namespace Tests.Infrastructure
 
         protected int LongWaitTime = 15000; //under stress the thread pool may take time to schedule the task to complete the set of the TCS
 
-        protected async Task<RachisConsensus<CountingStateMachine>> CreateNetworkAndGetLeader(int nodeCount, [CallerMemberName] string caller = null, bool watcherCluster = false, bool shouldRunInMemory = true)
+        protected async Task<RachisConsensus<CountingStateMachine>> CreateNetworkAndGetLeader(int nodeCount, [CallerMemberName] string caller = "", bool watcherCluster = false, bool shouldRunInMemory = true)
         {
             string[] allowedNodeTags = { "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z" };
 
@@ -206,7 +206,7 @@ namespace Tests.Infrastructure
 
         protected bool EnableCaptureWriteTransactionStackTrace = false;
 
-        protected RachisConsensus<CountingStateMachine> SetupServer(bool bootstrap = false, int electionTimeout = 300, [CallerMemberName] string caller = null, bool shouldRunInMemory = true, string nodeTag = null)
+        protected RachisConsensus<CountingStateMachine> SetupServer(bool bootstrap = false, int electionTimeout = 300, [CallerMemberName] string caller = "", bool shouldRunInMemory = true, string nodeTag = null)
         {
             var tcpListener = new TcpListener(IPAddress.Loopback, 0);
             tcpListener.Start();

@@ -51,7 +51,7 @@ public partial class RavenTestBase
             Etl = new ShardedEtlTestBase(_parent);
         }
 
-        public DocumentStore GetDocumentStore(Options options = null, [CallerMemberName] string caller = null, Dictionary<int, DatabaseTopology> shards = null)
+        public DocumentStore GetDocumentStore(Options options = null, [CallerMemberName] string caller = "", Dictionary<int, DatabaseTopology> shards = null)
         {
             var shardedOptions = options ?? new Options();
             shardedOptions.ModifyDatabaseRecord += r =>

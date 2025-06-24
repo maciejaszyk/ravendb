@@ -1323,7 +1323,7 @@ loadToOrders(partitionBy(['year', orderDate.getFullYear()]),
             });
         }
 
-        private S3Settings GetS3Settings([CallerMemberName] string caller = null)
+        private S3Settings GetS3Settings([CallerMemberName] string caller = "")
         {
             var s3Settings = AmazonS3RetryFactAttribute.S3Settings;
             if (s3Settings == null)

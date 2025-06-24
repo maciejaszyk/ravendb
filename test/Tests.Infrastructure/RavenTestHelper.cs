@@ -273,7 +273,7 @@ namespace Tests.Infrastructure
             }
         }
 
-        public static void AssertNotRunningOnCi([CallerMemberName] string caller = null)
+        public static void AssertNotRunningOnCi([CallerMemberName] string caller = "")
         {
             if (IsRunningOnCI)
                 throw new InvalidOperationException($"Operation '{caller}' is forbidden, because tests are running on CI.");

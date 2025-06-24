@@ -1148,7 +1148,7 @@ namespace SlowTests.SparrowTests
             await VerifyLogDownloadByDateRange(startDateStr: null, endDate, testFiles, compressing);
         }
 
-        private async Task VerifyLogDownloadByDateRange(string startDateStr, string endDateStr, List<TestFile> testFiles, bool compressing, [CallerMemberName] string caller = null)
+        private async Task VerifyLogDownloadByDateRange(string startDateStr, string endDateStr, List<TestFile> testFiles, bool compressing, [CallerMemberName] string caller = "")
         {
             var path = RavenTestHelper.NewDataPath(caller, serverPort: 0, forceCreateDir: true);
             try

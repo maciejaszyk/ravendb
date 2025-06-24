@@ -115,7 +115,7 @@ namespace BenchmarkTests
             return store;
         }
 
-        protected override DocumentStore GetDocumentStore(Options options = null, [CallerMemberName] string caller = null)
+        protected override DocumentStore GetDocumentStore(Options options = null, [CallerMemberName] string caller = "")
         {
             // since we want server to survive between tests runs 
             // we have to cheat a little bit

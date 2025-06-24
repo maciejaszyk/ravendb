@@ -11,14 +11,14 @@ namespace Raven.Server.Documents.Sharding.Handlers
         public async Task Post()
         {
             using (var processor = new ShardedQueriesHandlerProcessorForGet(this, HttpMethod.Post))
-                await processor.ExecuteAsync();
+                await processor.Execute();
         }
 
         [RavenShardedAction("/databases/*/queries", "GET")]
         public async Task Get()
         {
             using (var processor = new ShardedQueriesHandlerProcessorForGet(this, HttpMethod.Get))
-                await processor.ExecuteAsync();
+                await processor.Execute();
         }
 
         [RavenShardedAction("/databases/*/queries", "PATCH")]

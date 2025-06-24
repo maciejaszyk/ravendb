@@ -123,12 +123,12 @@ namespace FastTests
                 );
             }
 
-            public (DocumentStore src, DocumentStore dest, AddEtlOperationResult result) CreateSrcDestAndAddEtl(string collections, string script, bool applyToAllDocuments = false, bool disabled = false, string mentor = null, Options srcOptions = null, [CallerMemberName] string caller = null)
+            public (DocumentStore src, DocumentStore dest, AddEtlOperationResult result) CreateSrcDestAndAddEtl(string collections, string script, bool applyToAllDocuments = false, bool disabled = false, string mentor = null, Options srcOptions = null, [CallerMemberName] string caller = "")
             {
                 return CreateSrcDestAndAddEtl(new[] { collections }, script, applyToAllDocuments, disabled, mentor, srcOptions, caller);
             }
 
-            public (DocumentStore src, DocumentStore dest, AddEtlOperationResult result) CreateSrcDestAndAddEtl(IEnumerable<string> collections, string script, bool applyToAllDocuments = false, bool disabled = false, string mentor = null, Options srcOptions = null, [CallerMemberName] string caller = null)
+            public (DocumentStore src, DocumentStore dest, AddEtlOperationResult result) CreateSrcDestAndAddEtl(IEnumerable<string> collections, string script, bool applyToAllDocuments = false, bool disabled = false, string mentor = null, Options srcOptions = null, [CallerMemberName] string caller = "")
             {
                 _src = _parent.GetDocumentStore(srcOptions, caller);
                 _dest = _parent.GetDocumentStore(caller: caller);

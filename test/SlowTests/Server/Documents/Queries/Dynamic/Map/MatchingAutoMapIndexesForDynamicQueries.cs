@@ -29,7 +29,7 @@ namespace SlowTests.Server.Documents.Queries.Dynamic.Map
         private DocumentDatabase _documentDatabase;
         private DynamicQueryToIndexMatcher _sut;
 
-        public void Initialize([CallerMemberName] string caller = null)
+        public void Initialize([CallerMemberName] string caller = "")
         {
             _documentDatabase = CreateDocumentDatabase(caller: caller);
 

@@ -26,7 +26,7 @@ namespace SlowTests.Issues
         {
         }
 
-        protected override RavenServer GetNewServer(ServerCreationOptions options = null, [CallerMemberName] string caller = null)
+        protected override RavenServer GetNewServer(ServerCreationOptions options = null, [CallerMemberName] string caller = "")
         {
             if (options == null)
             {

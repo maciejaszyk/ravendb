@@ -63,7 +63,7 @@ public partial class RavenTestBase
             return clientCertificate;
         }
 
-        public TestCertificatesHolder SetupServerAuthentication(IDictionary<string, string> customSettings = null, string serverUrl = null, TestCertificatesHolder certificates = null, [CallerMemberName] string caller = null)
+        public TestCertificatesHolder SetupServerAuthentication(IDictionary<string, string> customSettings = null, string serverUrl = null, TestCertificatesHolder certificates = null, [CallerMemberName] string caller = "")
         {
             if (customSettings == null)
                 customSettings = new ConcurrentDictionary<string, string>();
@@ -81,7 +81,7 @@ public partial class RavenTestBase
             return certificates;
         }
 
-        public TestCertificatesHolder GenerateAndSaveSelfSignedCertificate(bool createNew = false, [CallerMemberName] string caller = null)
+        public TestCertificatesHolder GenerateAndSaveSelfSignedCertificate(bool createNew = false, [CallerMemberName] string caller = "")
         {
             if (createNew)
                 return ReturnCertificatesHolder(Generate(caller, Interlocked.Increment(ref Counter)));

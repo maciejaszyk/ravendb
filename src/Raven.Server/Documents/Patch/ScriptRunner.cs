@@ -800,7 +800,7 @@ namespace Raven.Server.Documents.Patch
                 return new JsArray(ScriptEngine, entries.ToArray());
             }
 
-            private void GenericSortTwoElementArray(JsValue[] args, [CallerMemberName] string caller = null)
+            private void GenericSortTwoElementArray(JsValue[] args, [CallerMemberName] string caller = "")
             {
                 void Swap()
                 {

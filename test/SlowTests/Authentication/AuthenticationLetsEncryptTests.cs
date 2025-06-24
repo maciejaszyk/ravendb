@@ -609,7 +609,7 @@ namespace SlowTests.Authentication
             return (cluster.Leader, cluster.Nodes, serverCert);
         }
 
-        private DocumentStore GetDocumentStoreForServerOnly(X509Certificate2 certificate = null, [CallerMemberName] string caller = null)
+        private DocumentStore GetDocumentStoreForServerOnly(X509Certificate2 certificate = null, [CallerMemberName] string caller = "")
         {
             return GetDocumentStore(new Options
             {

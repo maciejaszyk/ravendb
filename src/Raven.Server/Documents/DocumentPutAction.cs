@@ -648,7 +648,7 @@ namespace Raven.Server.Documents
         }
 
         [DoesNotReturn]
-        public static void ThrowRequiresTransaction([CallerMemberName] string caller = null)
+        public static void ThrowRequiresTransaction([CallerMemberName] string caller = "")
         {
             // ReSharper disable once NotResolvedInText
             throw new ArgumentException("Context must be set with a valid transaction before calling " + caller, "context");

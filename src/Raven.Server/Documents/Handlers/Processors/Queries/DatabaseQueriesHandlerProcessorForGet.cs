@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Raven.Server.Config;
@@ -15,7 +16,7 @@ using Sparrow.Json;
 
 namespace Raven.Server.Documents.Handlers.Processors.Queries;
 
-internal sealed class DatabaseQueriesHandlerProcessorForGet : AbstractQueriesHandlerProcessorForGet<QueriesHandler, DocumentsOperationContext, QueryOperationContext, Document>
+internal sealed class DatabaseQueriesHandlerProcessorForGet : AbstractQueriesHandlerProcessorForGet<QueriesHandler, DocumentsOperationContext, QueryOperationContext, DocumentQueryResult, Document>
 {
     public DatabaseQueriesHandlerProcessorForGet([NotNull] QueriesHandler requestHandler, HttpMethod method) : base(requestHandler, requestHandler.Database.QueryMetadataCache, method)
     {
@@ -46,18 +47,13 @@ internal sealed class DatabaseQueriesHandlerProcessorForGet : AbstractQueriesHan
         return await RequestHandler.Database.QueryRunner.ExecuteSuggestionQuery(query, queryContext, existingResultEtag, token);
     }
 
-    protected override async ValueTask<QueryResultServerSide<Document>> GetQueryResultsAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    protected override Task<DocumentQueryResult> GetQueryResultsAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
         long? existingResultEtag, bool metadataOnly, OperationCancelToken token)
     {
-        return await RequestHandler.Database.QueryRunner.ExecuteQuery(query, queryContext, existingResultEtag, token);
+        return RequestHandler.Database.QueryRunner.ExecuteQuery(query, queryContext, existingResultEtag, token);
     }
     
-    protected override async Task<QueryResultServerSide<Document>> GetQueryResultsTaskAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
-        long? existingResultEtag, bool metadataOnly, OperationCancelToken token)
-    {
-        return await RequestHandler.Database.QueryRunner.ExecuteQuery(query, queryContext, existingResultEtag, token);
-    }
-
     protected override void EnsureQueryContextInitialized(QueryOperationContext queryContext, IndexQueryServerSide indexQuery)
     {
         queryContext.WithQuery(indexQuery.Metadata);

@@ -57,7 +57,7 @@ namespace Raven.Server.Documents.Indexes
                 _releaseServer = _database.ServerStore.Engine.ContextPool.AllocateOperationContext(out Server);
         }
 
-        public IDisposable OpenReadTransaction([CallerMemberName] string caller = null)
+        public IDisposable OpenReadTransaction([CallerMemberName] string caller = "")
         {
             var documentsTx = Documents.OpenReadTransaction(caller);
             RavenTransaction serverTx = null;

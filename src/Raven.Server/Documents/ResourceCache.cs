@@ -219,7 +219,7 @@ namespace Raven.Server.Documents
             }
         }
 
-        public IDisposable RemoveLockAndReturn(string databaseName, Action<TResource> onSuccess, out TResource resource, [CallerMemberName] string caller = null, string reason = null)
+        public IDisposable RemoveLockAndReturn(string databaseName, Action<TResource> onSuccess, out TResource resource, [CallerMemberName] string caller = "", string reason = null)
         {
 
             Task<TResource> current = null;

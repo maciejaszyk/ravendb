@@ -10,6 +10,7 @@ using Raven.Server.Config;
 using Raven.Server.Documents.Handlers.Processors.Queries;
 using Raven.Server.Documents.Queries;
 using Raven.Server.Documents.Queries.Facets;
+using Raven.Server.Documents.Queries.Sharding;
 using Raven.Server.Documents.Queries.Suggestions;
 using Raven.Server.Documents.Queries.Timings;
 using Raven.Server.Documents.Sharding.Queries;
@@ -24,7 +25,7 @@ using Sparrow.Json;
 
 namespace Raven.Server.Documents.Sharding.Handlers.Processors.Queries;
 
-internal sealed class ShardedQueriesHandlerProcessorForGet : AbstractQueriesHandlerProcessorForGet<ShardedQueriesHandler, TransactionOperationContext, TransactionOperationContext, BlittableJsonReaderObject>
+internal sealed class ShardedQueriesHandlerProcessorForGet : AbstractQueriesHandlerProcessorForGet<ShardedQueriesHandler, TransactionOperationContext, TransactionOperationContext, ShardedQueryResult, BlittableJsonReaderObject>
 {
     public ShardedQueriesHandlerProcessorForGet([NotNull] ShardedQueriesHandler requestHandler, HttpMethod method) : base(requestHandler, requestHandler.DatabaseContext.QueryMetadataCache, method)
     {
@@ -116,7 +117,7 @@ internal sealed class ShardedQueriesHandlerProcessorForGet : AbstractQueriesHand
         }
     }
 
-    protected override async ValueTask<QueryResultServerSide<BlittableJsonReaderObject>> GetQueryResultsAsync(IndexQueryServerSide query,
+    protected override async Task<ShardedQueryResult> GetQueryResultsAsync(IndexQueryServerSide query,
         TransactionOperationContext queryContext, long? existingResultEtag, bool metadataOnly, OperationCancelToken token)
     {
         using (var timings = Timings(query))
@@ -137,29 +138,7 @@ internal sealed class ShardedQueriesHandlerProcessorForGet : AbstractQueriesHand
             }
         }
     }
-
-    protected override async Task<QueryResultServerSide<BlittableJsonReaderObject>> GetQueryResultsTaskAsync(IndexQueryServerSide query, TransactionOperationContext queryContext, long? existingResultEtag, bool metadataOnly,
-        OperationCancelToken token)
-    {
-        using (var timings = Timings(query))
-        {
-            var indexName = AbstractQueryRunner.GetIndexName(query);
-
-            using (RequestHandler.DatabaseContext.QueryRunner.MarkQueryAsRunning(indexName, query, token))
-            {
-                var queryProcessor = new ShardedQueryProcessor(queryContext, RequestHandler, query, existingResultEtag, metadataOnly, token.Token);
-
-                await queryProcessor.InitializeAsync();
-
-                var result = await queryProcessor.ExecuteShardedOperations(timings.Scope);
-
-                result.DurationInMs = timings.Duration;
-
-                return result;
-            }
-        }
-    }
-
+    
     protected override void AssertIndexQuery(IndexQueryServerSide indexQuery)
     {
         if (indexQuery.Diagnostics != null)

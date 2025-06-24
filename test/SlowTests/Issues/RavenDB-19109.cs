@@ -98,7 +98,7 @@ public class RavenDB_19109 : RavenTestBase
         }
     }
 
-    private IDocumentStore GetDocumentStore(out string databasePath, [CallerMemberName] string caller = null)
+    private IDocumentStore GetDocumentStore(out string databasePath, [CallerMemberName] string caller = "")
     {
         databasePath = NewDataPath();
         var store = GetDocumentStore(new Options()

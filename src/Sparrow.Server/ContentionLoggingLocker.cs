@@ -35,7 +35,7 @@ namespace Sparrow.Server
             }
         }
 
-        public Release Lock([CallerMemberName] string caller = null, [CallerLineNumber] int line = 0)
+        public Release Lock([CallerMemberName] string caller = "", [CallerLineNumber] int line = 0)
         {
             _lockTaken = false;
             Monitor.TryEnter(_locker, 0, ref _lockTaken);

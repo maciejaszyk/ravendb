@@ -905,7 +905,7 @@ for (var i = 0; i < this.Lines.length; i++){
             });
         }
 
-        private GoogleCloudSettings GetGoogleCloudSettings([CallerMemberName] string caller = null)
+        private GoogleCloudSettings GetGoogleCloudSettings([CallerMemberName] string caller = "")
         {
             var googleCloudSettings = GoogleCloudRetryFactAttribute.GoogleCloudSettings;
             if (googleCloudSettings == null)

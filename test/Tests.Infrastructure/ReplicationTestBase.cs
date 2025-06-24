@@ -428,7 +428,7 @@ namespace Tests.Infrastructure
             return handler;
         }
 
-        protected async Task<(DocumentStore source, DocumentStore destination)> CreateDuoCluster(Options options, [CallerMemberName] string caller = null)
+        protected async Task<(DocumentStore source, DocumentStore destination)> CreateDuoCluster(Options options, [CallerMemberName] string caller = "")
         {
             var (_, leader) = await CreateRaftCluster(2);
             var follower = Servers.First(srv => ReferenceEquals(srv, leader) == false);

@@ -189,7 +189,7 @@ namespace FastTests
         {
         }
 
-        protected string GetDatabaseName([CallerMemberName] string caller = null)
+        protected string GetDatabaseName([CallerMemberName] string caller = "")
         {
             if (caller != null && caller.Contains(".ctor"))
                 throw new InvalidOperationException(
@@ -396,7 +396,7 @@ namespace FastTests
             }
         }
 
-        public void UseNewLocalServer(IDictionary<string, string> customSettings = null, bool? runInMemory = null, string customConfigPath = null, [CallerMemberName] string caller = null, List<Socket> sockets = null)
+        public void UseNewLocalServer(IDictionary<string, string> customSettings = null, bool? runInMemory = null, string customConfigPath = null, [CallerMemberName] string caller = "", List<Socket> sockets = null)
         {
             if (_localServer != _globalServer && _globalServer != null)
             {
@@ -559,7 +559,7 @@ namespace FastTests
 
         private static readonly ConcurrentDictionary<RavenServer, string> LeakedServers = new();
 
-        protected virtual RavenServer GetNewServer(ServerCreationOptions options = null, [CallerMemberName] string caller = null)
+        protected virtual RavenServer GetNewServer(ServerCreationOptions options = null, [CallerMemberName] string caller = "")
         {
             if (options == null)
             {

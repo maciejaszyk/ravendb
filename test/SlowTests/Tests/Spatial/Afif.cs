@@ -75,7 +75,7 @@ namespace SlowTests.Tests.Spatial
 
             private IDocumentStore _store;
 
-            public void Initialize([CallerMemberName] string caller = null)
+            public void Initialize([CallerMemberName] string caller = "")
             {
                 _store = GetDocumentStore(caller: caller);
 

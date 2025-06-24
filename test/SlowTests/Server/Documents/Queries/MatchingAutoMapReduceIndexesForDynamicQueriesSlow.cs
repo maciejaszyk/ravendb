@@ -23,7 +23,7 @@ namespace SlowTests.Server.Documents.Queries
         private DocumentDatabase _documentDatabase;
         protected DynamicQueryToIndexMatcher _sut;
 
-        public void Initialize([CallerMemberName] string caller = null)
+        public void Initialize([CallerMemberName] string caller = "")
         {
             _documentDatabase = CreateDocumentDatabase(caller: caller);
 

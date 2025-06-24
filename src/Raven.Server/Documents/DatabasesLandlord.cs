@@ -351,7 +351,7 @@ namespace Raven.Server.Documents
             return disabled || isRestoring;
         }
 
-        private void UnloadDatabaseInternal(string databaseName, [CallerMemberName] string caller = null)
+        private void UnloadDatabaseInternal(string databaseName, [CallerMemberName] string caller = "")
         {
             using (DatabasesCache.RemoveLockAndReturn(databaseName, CompleteDatabaseUnloading, out _, caller))
             {
@@ -775,13 +775,13 @@ namespace Raven.Server.Documents
             }
         }
 
-        public Task<ShardedDocumentDatabase> TryGetOrCreateShardedResourceStore(StringSegment databaseName, DateTime? wakeup = null, bool ignoreDisabledDatabase = false, bool ignoreBeenDeleted = false, bool ignoreNotRelevant = false, Action<string> addToInitLog = null, [CallerMemberName] string caller = null)
+        public Task<ShardedDocumentDatabase> TryGetOrCreateShardedResourceStore(StringSegment databaseName, DateTime? wakeup = null, bool ignoreDisabledDatabase = false, bool ignoreBeenDeleted = false, bool ignoreNotRelevant = false, Action<string> addToInitLog = null, [CallerMemberName] string caller = "")
         {
             var t = TryGetOrCreateResourceStore(databaseName, wakeup, ignoreDisabledDatabase, ignoreBeenDeleted, ignoreNotRelevant, addToInitLog, caller);
             return t.ContinueWith(database => ShardedDocumentDatabase.CastToShardedDocumentDatabase(database.Result), TaskContinuationOptions.OnlyOnRanToCompletion);
         }
 
-        public Task<DocumentDatabase> TryGetOrCreateResourceStore(StringSegment databaseName, DateTime? wakeup = null, bool ignoreDisabledDatabase = false, bool ignoreBeenDeleted = false, bool ignoreNotRelevant = false, Action<string> addToInitLog = null, [CallerMemberName] string caller = null)
+        public Task<DocumentDatabase> TryGetOrCreateResourceStore(StringSegment databaseName, DateTime? wakeup = null, bool ignoreDisabledDatabase = false, bool ignoreBeenDeleted = false, bool ignoreNotRelevant = false, Action<string> addToInitLog = null, [CallerMemberName] string caller = "")
         {
             if (_wakeupTimers.TryRemove(databaseName.Value, out var timer) && timer.IsValueCreated)
             {
@@ -1262,13 +1262,13 @@ namespace Raven.Server.Documents
             PendingClusterTransactions,
         }
 
-        public bool UnloadDirectly(StringSegment databaseName, DateTime? wakeup = null, [CallerMemberName] string caller = null)
+        public bool UnloadDirectly(StringSegment databaseName, DateTime? wakeup = null, [CallerMemberName] string caller = "")
         {
             var nextScheduledAction = new IdleDatabaseActivity(IdleDatabaseActivityType.WakeUpDatabase);
             return UnloadDirectly(databaseName, nextScheduledAction, caller);
         }
 
-        public bool UnloadDirectly(StringSegment databaseName, IdleDatabaseActivity idleDatabaseActivity, [CallerMemberName] string caller = null)
+        public bool UnloadDirectly(StringSegment databaseName, IdleDatabaseActivity idleDatabaseActivity, [CallerMemberName] string caller = "")
         {
             if (ShouldContinueDispose(databaseName.Value, idleDatabaseActivity) == false)
             {

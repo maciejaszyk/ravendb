@@ -1765,7 +1765,7 @@ namespace SlowTests.Sharding.Backup
             return path[..(index + 1)];
         }
 
-        private S3Settings GetS3Settings([CallerMemberName] string caller = null)
+        private S3Settings GetS3Settings([CallerMemberName] string caller = "")
         {
             var s3Settings = AmazonS3RetryFactAttribute.S3Settings;
             if (s3Settings == null)
@@ -1784,7 +1784,7 @@ namespace SlowTests.Sharding.Backup
             };
         }
 
-        private AzureSettings GetAzureSettings([CallerMemberName] string caller = null)
+        private AzureSettings GetAzureSettings([CallerMemberName] string caller = "")
         {
             var settings = AzureRetryFactAttribute.AzureSettings;
             if (settings == null)
@@ -1803,7 +1803,7 @@ namespace SlowTests.Sharding.Backup
             };
         }
 
-        private GoogleCloudSettings GetGoogleCloudSettings([CallerMemberName] string caller = null)
+        private GoogleCloudSettings GetGoogleCloudSettings([CallerMemberName] string caller = "")
         {
             var googleCloudSettings = GoogleCloudRetryFactAttribute.GoogleCloudSettings;
             if (googleCloudSettings == null)

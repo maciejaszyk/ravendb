@@ -34,10 +34,10 @@ namespace Sparrow.Json
                 return new ValueTask<int>(0);
 
             FlushInternal();
-            return new ValueTask<int>(OuterFlushAsync());
+            return OuterFlushAsync();
         }
 
-        public async Task<int> OuterFlushAsync()
+        private async ValueTask<int> OuterFlushAsync()
         {
             var innerStream = _stream as MemoryStream;
             if (innerStream == null)

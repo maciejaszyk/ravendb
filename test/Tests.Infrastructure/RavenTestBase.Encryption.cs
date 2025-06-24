@@ -112,7 +112,7 @@ public partial class RavenTestBase
             server.ServerStore.DeleteSecretKey(databaseName);
         }
 
-        public string SetupEncryptedDatabase(out TestCertificatesHolder certificates, out byte[] masterKey, [CallerMemberName] string caller = null)
+        public string SetupEncryptedDatabase(out TestCertificatesHolder certificates, out byte[] masterKey, [CallerMemberName] string caller = "")
         {
             certificates = _parent.Certificates.SetupServerAuthentication();
             _parent.Certificates.RegisterClientCertificate(certificates, new Dictionary<string, DatabaseAccess>(), SecurityClearance.ClusterAdmin);
@@ -120,7 +120,7 @@ public partial class RavenTestBase
             return SetupEncryptedDatabaseOnNonAuthenticatedServer(out masterKey, caller);
         }
 
-        public string SetupEncryptedDatabaseOnNonAuthenticatedServer(out byte[] masterKey, [CallerMemberName] string caller = null)
+        public string SetupEncryptedDatabaseOnNonAuthenticatedServer(out byte[] masterKey, [CallerMemberName] string caller = "")
         {
             var dbName = _parent.GetDatabaseName(caller);
             string base64Key = CreateMasterKey(out masterKey);

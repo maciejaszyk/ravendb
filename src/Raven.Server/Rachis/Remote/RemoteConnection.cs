@@ -37,12 +37,12 @@ namespace Raven.Server.Rachis.Remote
         public string Dest => _destTag;
         public TcpConnectionHeaderMessage.SupportedFeatures Features => _features;
 
-        public RemoteConnection(string src, long term, Stream stream, TcpConnectionHeaderMessage.SupportedFeatures features, Action disconnect, [CallerMemberName] string caller = null)
+        public RemoteConnection(string src, long term, Stream stream, TcpConnectionHeaderMessage.SupportedFeatures features, Action disconnect, [CallerMemberName] string caller = "")
             : this(dest: "?", src, term, stream,features, disconnect, caller)
         {
         }
 
-        public RemoteConnection(string dest, string src, long term, Stream stream, TcpConnectionHeaderMessage.SupportedFeatures features, Action disconnect, [CallerMemberName] string caller = null)
+        public RemoteConnection(string dest, string src, long term, Stream stream, TcpConnectionHeaderMessage.SupportedFeatures features, Action disconnect, [CallerMemberName] string caller = "")
         {
             _destTag = dest;
             _src = src;

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Net.Http;
 using System.Net.WebSockets;
+using System.Runtime.CompilerServices;
 using Raven.Client;
 using Microsoft.AspNetCore.Http;
 using Raven.Client.Documents.Conventions;
@@ -108,6 +109,7 @@ namespace Raven.Server.Extensions
             return request.Headers.ContainsKey(Constants.Headers.StudioVersion);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsFromOrchestrator(this HttpRequest request)
         {
             return GetBoolFromHeaders(request, Constants.Headers.Sharded) ?? false;
@@ -120,12 +122,11 @@ namespace Raven.Server.Extensions
 
         private static bool? GetBoolFromHeaders(HttpRequest request, string name)
         {
-            var headers = request.Headers[name];
+            request.Headers.TryGetValue(name, out var headers);
             if (headers.Count == 0)
                 return null;
-
-
-            var raw = headers[0][0] == '\"'
+            
+            var raw = headers[0]![0] == '\"'
                 ? headers[0].AsSpan().Slice(1, headers[0].Length - 2)
                 : headers[0].AsSpan();
 

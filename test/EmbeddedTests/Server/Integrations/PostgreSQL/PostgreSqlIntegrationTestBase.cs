@@ -40,7 +40,7 @@ namespace EmbeddedTests.Server.Integrations.PostgreSQL
         protected const string CorrectUser = "root";
         protected const string CorrectPassword = "s3cr3t";
 
-        protected IDocumentStore GetDocumentStore([CallerMemberName] string caller = null, bool sharded = false)
+        protected IDocumentStore GetDocumentStore([CallerMemberName] string caller = "", bool sharded = false)
         {
             var options = CopyServerAndCreateOptions();
 

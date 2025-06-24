@@ -47,7 +47,7 @@ namespace SlowTests.Cluster
         {
         }
 
-        protected override RavenServer GetNewServer(ServerCreationOptions options = null, [CallerMemberName] string caller = null)
+        protected override RavenServer GetNewServer(ServerCreationOptions options = null, [CallerMemberName] string caller = "")
         {
             options ??= new ServerCreationOptions();
             options.CustomSettings ??= new Dictionary<string, string>();

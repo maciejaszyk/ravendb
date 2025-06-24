@@ -855,7 +855,7 @@ loadToOrders(partitionBy(['year', year], ['month', month], ['source', $customPar
             });
         }
 
-        private AzureSettings GetAzureSettings([CallerMemberName] string caller = null)
+        private AzureSettings GetAzureSettings([CallerMemberName] string caller = "")
         {
             var settings = AzureRetryFactAttribute.AzureSettings;
             if (settings == null)

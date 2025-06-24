@@ -2233,7 +2233,7 @@ loadToAddresses(this.Address);
                 });
         }
 
-        private static S3Settings GetS3Settings([CallerMemberName] string caller = null)
+        private static S3Settings GetS3Settings([CallerMemberName] string caller = "")
         {
             var s3Settings = AmazonS3RetryFactAttribute.S3Settings;
             if (s3Settings == null)
