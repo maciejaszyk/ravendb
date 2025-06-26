@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -961,7 +962,8 @@ namespace Raven.Server.Documents.Handlers.Batches
                         state.StringBuffer[8] == (byte)'h')
                         return CommandType.JsonPatch;
 
-                    if ("HeartBeat"u8.IsEqualConstant(state.StringBuffer))
+                    if (*(long*)state.StringBuffer == 7018088662229411144 &&
+                        state.StringBuffer[8] == (byte)'t')
                         return CommandType.HeartBeat;
                     break;
                 case 10:
