@@ -10,7 +10,6 @@ using Sparrow.Collections;
 using Sparrow.Json;
 using Sparrow.Json.Parsing;
 using Sparrow.Server;
-using Sparrow.Server.Strings;
 using Constants = Raven.Client.Constants;
 
 namespace Raven.Server.Documents
@@ -159,12 +158,10 @@ namespace Raven.Server.Documents
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool AboutToReadPropertyName(IJsonParser reader, JsonParserState state)
         {
-            AssertNotDisposed();
-
-            if (reader is UnmanagedJsonParser unmanagedParser)
-                return AboutToReadPropertyNameInternal(unmanagedParser, state);
-            if (reader is ObjectJsonParser objectParser)
-                return AboutToReadPropertyNameInternal(objectParser, state);
+            if (reader is UnmanagedJsonParser)
+                return AboutToReadPropertyNameInternal((UnmanagedJsonParser)reader, state);
+            if (reader is ObjectJsonParser)
+                return AboutToReadPropertyNameInternal((ObjectJsonParser)reader, state);
 
             return AboutToReadPropertyNameInternal(reader, state);
         }
@@ -189,7 +186,7 @@ namespace Raven.Server.Documents
 
                 if (_readingMetadataObject == false)
                 {
-                    if ("@metadata"u8.IsEqualConstant(state.StringBuffer, state.StringSize) == true)
+                    if (state.StringSize == 9 && state.StringBuffer[0] == (byte)'@' && *(long*)(state.StringBuffer + 1) == 7022344802737087853)
                         _readingMetadataObject = true;
 
                     return true;
@@ -220,7 +217,7 @@ namespace Raven.Server.Documents
 
                 if (_readingMetadataObject == false)
                 {
-                    if ("@metadata"u8.IsEqualConstant(state.StringBuffer, state.StringSize) == true)
+                    if (state.StringSize == 9 && state.StringBuffer[0] == (byte)'@' && *(long*)(state.StringBuffer + 1) == 7022344802737087853)
                         _readingMetadataObject = true;
 
                     return true;
@@ -251,7 +248,7 @@ namespace Raven.Server.Documents
 
                 if (_readingMetadataObject == false)
                 {
-                    if ("@metadata"u8.IsEqualConstant(state.StringBuffer, state.StringSize) == true)
+                    if (state.StringSize == 9 && state.StringBuffer[0] == (byte)'@' && *(long*)(state.StringBuffer + 1) == 7022344802737087853)
                         _readingMetadataObject = true;
 
                     return true;
@@ -303,8 +300,8 @@ namespace Raven.Server.Documents
                     }
 
                 case 3: // @id
-
-                    if ("@id"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (state.StringBuffer[0] != (byte)'@' ||
+                        *(short*)(state.StringBuffer + 1) != 25705)
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -322,7 +319,8 @@ namespace Raven.Server.Documents
                     break;
 
                 case 5: // @etag
-                    if ("@etag"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (state.StringBuffer[0] != (byte)'@' ||
+                        *(int*)(state.StringBuffer + 1) != 1734440037)
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -366,7 +364,9 @@ namespace Raven.Server.Documents
 
                     goto case -1;
                 case 6: // @flags
-                    if ("@flags"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (state.StringBuffer[0] != (byte)'@' ||
+                        *(int*)(state.StringBuffer + 1) != 1734437990 ||
+                        state.StringBuffer[1 + sizeof(int)] != (byte)'s')
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -387,7 +387,8 @@ namespace Raven.Server.Documents
                     // always remove the @counters metadata
                     // not doing so might cause us to have counter on the document but not in the storage.
                     // the counters will be updated when we import the counters themselves
-                    if ("@counters"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (state.StringBuffer[0] != (byte)'@' ||
+                        *(long*)(state.StringBuffer + 1) != 8318823012450529123)
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -405,7 +406,9 @@ namespace Raven.Server.Documents
                     goto case -2;
                 case 11: // @timeseries
                     // always remove the @timeseries metadata
-                    if ("@timeseries"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (state.StringBuffer[0] != (byte)'@' ||
+                        *(long*)(state.StringBuffer + 1) != 7598247067624761716 ||
+                        *(short*)(state.StringBuffer + 1 + sizeof(long)) != 29541)
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -425,13 +428,20 @@ namespace Raven.Server.Documents
                     goto case -2;
 
                 case 12: // @index-score OR @attachments
+
                     if (state.StringBuffer[0] == (byte)'@')
                     {   // @index-score
-                        if ("@index-score"u8.IsEqualConstant(state.StringBuffer))
+                        if (*(long*)(state.StringBuffer + 1) == 7166121427196997225 &&
+                            *(short*)(state.StringBuffer + 1 + sizeof(long)) == 29295 &&
+                            state.StringBuffer[1 + sizeof(long) + sizeof(short)] == (byte)'e')
+                        {
                             goto case -1;
+                        }
 
                         // @attachments
-                        if ("@attachments"u8.IsEqualConstant(state.StringBuffer))
+                        if (*(long*)(state.StringBuffer + 1) == 7308612546338255969 &&
+                            *(short*)(state.StringBuffer + 1 + sizeof(long)) == 29806 &&
+                            state.StringBuffer[1 + sizeof(long) + sizeof(short)] == (byte)'s')
                         {
                             SeenAttachments = true;
                             if (OperateOnTypes.HasFlag(DatabaseItemType.Attachments) == false)
@@ -452,7 +462,9 @@ namespace Raven.Server.Documents
                     return true;
 
                 case 13: //Last-Modified
-                    if ("Last-Modified"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(long*)state.StringBuffer != 7237087983830262092 ||
+                        *(int*)(state.StringBuffer + sizeof(long)) != 1701406313 ||
+                        state.StringBuffer[12] != (byte)'d')
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -464,7 +476,9 @@ namespace Raven.Server.Documents
                     if (state.StringBuffer[0] == (byte)'@')
                     {
                         // @change-vector
-                        if ("@change-vector"u8.IsEqualConstant(state.StringBuffer))
+                        if (*(long*)(state.StringBuffer + 1) == 8515573965335390307 &&
+                            *(int*)(state.StringBuffer + 1 + sizeof(long)) == 1869898597 &&
+                            state.StringBuffer[1 + sizeof(long) + sizeof(int)] == (byte)'r')
                         {
                             if (reader.Read() == false)
                             {
@@ -483,7 +497,9 @@ namespace Raven.Server.Documents
                         }
 
                         // @last-modified
-                        if ("@last-modified"u8.IsEqualConstant(state.StringBuffer))
+                        if (*(long*)(state.StringBuffer + 1) == 7237123168202350956 &&
+                            *(int*)(state.StringBuffer + 1 + sizeof(long)) == 1701406313 &&
+                            state.StringBuffer[1 + sizeof(long) + sizeof(int)] == (byte)'d')
                         {
                             if (reader.Read() == false)
                             {
@@ -502,7 +518,10 @@ namespace Raven.Server.Documents
                     return true;
 
                 case 15: //Raven-Read-Only
-                    if ("Raven-Read-Only"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(long*)state.StringBuffer != 7300947898092904786 ||
+                        *(int*)(state.StringBuffer + sizeof(long)) != 1328374881 ||
+                        *(short*)(state.StringBuffer + sizeof(long) + sizeof(int)) != 27758 ||
+                        state.StringBuffer[14] != (byte)'y')
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -511,7 +530,9 @@ namespace Raven.Server.Documents
                     goto case -1;
 
                 case 17: //Raven-Entity-Name --> @collection
-                    if ("Raven-Entity-Name"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(long*)state.StringBuffer != 7945807069737017682 ||
+                        *(long*)(state.StringBuffer + sizeof(long)) != 7881666780093245812 ||
+                        state.StringBuffer[16] != (byte)'e')
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -524,23 +545,30 @@ namespace Raven.Server.Documents
                     return true;
 
                 case 19: //Raven-Last-Modified or Raven-Delete-Marker
-
-                    if ("Raven-"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(int*)state.StringBuffer != 1702256978 ||
+                        *(short*)(state.StringBuffer + sizeof(int)) != 11630)
                     {
                         aboutToReadPropertyName = true;
                         return true;
                     }
 
-                    // PERF: We are aiming to ensure that on Vector128 architectures and AVX2 architecture we use
-                    // the vectorial implementation. 
-                    if ("en-Last-Modified"u8.IsEqualConstant(state.StringBuffer + "Rav"u8.Length) == false &&
-                        "en-Delete-Marker"u8.IsEqualConstant(state.StringBuffer + "Rav"u8.Length) == false)
+                    var longValue = *(long*)(state.StringBuffer + sizeof(int) + sizeof(short));
+                    var intValue = *(int*)(state.StringBuffer + sizeof(int) + sizeof(short) + sizeof(long));
+                    if ((longValue != 7237087983830262092 || intValue != 1701406313) && // long: Last-Mod, int: ifie
+                        (longValue != 5561212665464644932 || intValue != 1701540449))   // long: Delete-M, int: arke
                     {
                         aboutToReadPropertyName = true;
                         return true;
                     }
 
-                    var isLegacyLastModified = state.StringBuffer[18] == (byte)'d';
+                    var lb = state.StringBuffer[18];
+                    if (lb != (byte)'d' && lb != (byte)'r')
+                    {
+                        aboutToReadPropertyName = true;
+                        return true;
+                    }
+
+                    var isLegacyLastModified = lb == (byte)'d';
                     if (reader.Read() == false)
                     {
                         _state = isLegacyLastModified ? State.ReadingLegacyLastModified : State.ReadingLegacyDeleteMarker;
@@ -564,7 +592,10 @@ namespace Raven.Server.Documents
                     break;
 
                 case 21: //Raven-Expiration-Date
-                    if ("Raven-Expiration-Date"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(long*)state.StringBuffer != 8666383010116297042 ||
+                        *(long*)(state.StringBuffer + sizeof(long)) != 7957695015158966640 ||
+                        *(short*)(state.StringBuffer + sizeof(long) + sizeof(long)) != 17453 ||
+                        state.StringBuffer[20] != (byte)'e')
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -577,7 +608,11 @@ namespace Raven.Server.Documents
                     return true;
 
                 case 23: //Raven-Document-Revision
-                    if ("Raven-Document-Revision"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(long*)state.StringBuffer != 8017583188798234962 ||
+                        *(long*)(state.StringBuffer + sizeof(long)) != 5921517102558967139 ||
+                        *(int*)(state.StringBuffer + sizeof(long) + sizeof(long)) != 1936291429 ||
+                        *(short*)(state.StringBuffer + sizeof(long) + sizeof(long) + sizeof(int)) != 28521 ||
+                        state.StringBuffer[22] != (byte)'n')
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -585,7 +620,9 @@ namespace Raven.Server.Documents
 
                     goto case -1;
                 case 24: //Raven-Replication-Source
-                    if ("Raven-Replication-Source"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(long*)state.StringBuffer != 7300947898092904786 ||
+                        *(long*)(state.StringBuffer + sizeof(long)) != 8028075772393122928 ||
+                        *(long*)(state.StringBuffer + sizeof(long) + sizeof(long)) != 7305808869229538670)
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -593,16 +630,17 @@ namespace Raven.Server.Documents
 
                     goto case -1;
                 case 25: //Raven-Replication-Version OR Raven-Replication-History
-
-                    var lastByte = state.StringBuffer[24];
-                    if (lastByte != (byte)'n' && lastByte != (byte)'y')
+                    if (*(long*)state.StringBuffer != 7300947898092904786 ||
+                        *(long*)(state.StringBuffer + sizeof(long)) != 8028075772393122928)
                     {
                         aboutToReadPropertyName = true;
                         return true;
                     }
 
-                    if ("Raven-Replication-Version"u8.IsEqualConstant(state.StringBuffer) == false ||
-                        "Raven-Replication-History"u8.IsEqualConstant(state.StringBuffer) == false)
+                    var value = *(long*)(state.StringBuffer + sizeof(long) + sizeof(long));
+                    var lastByte = state.StringBuffer[24];
+                    if ((value != 8028074745928232302 || lastByte != (byte)'n') &&
+                        (value != 8245937481775066478 || lastByte != (byte)'y'))
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -619,15 +657,20 @@ namespace Raven.Server.Documents
 
                     // Raven-Replication-History is an array
                     if (isReplicationHistory)
+                    {
                         goto case -2;
-
-                    if (state.CurrentTokenType == JsonParserToken.StartArray || state.CurrentTokenType == JsonParserToken.StartObject)
+                    }
+                    else if (state.CurrentTokenType == JsonParserToken.StartArray ||
+                             state.CurrentTokenType == JsonParserToken.StartObject)
                         ThrowInvalidMetadataProperty(state, reader);
                     break;
 
                 case 29: //Non-Authoritative-Information
-
-                    if ("Non-Authoritative-Information"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(long*)state.StringBuffer != 7526769800038477646 ||
+                        *(long*)(state.StringBuffer + sizeof(long)) != 8532478930943832687 ||
+                        *(long*)(state.StringBuffer + sizeof(long) + sizeof(long)) != 7886488383206796645 ||
+                        *(int*)(state.StringBuffer + sizeof(long) + sizeof(long) + sizeof(long)) != 1869182049 ||
+                        state.StringBuffer[28] != (byte)'n')
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -636,9 +679,20 @@ namespace Raven.Server.Documents
                     goto case -1;
 
                 case 30: //Raven-Document-Parent-Revision OR Raven-Document-Revision-Status
+                    if (*(long*)state.StringBuffer != 8017583188798234962)
+                    {
+                        aboutToReadPropertyName = true;
+                        return true;
+                    }
 
-                    if ("Raven-Document-Parent-Revision"u8.IsEqualConstant(state.StringBuffer) == false &&
-                        "Raven-Document-Revision-Status"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if ((*(long*)(state.StringBuffer + sizeof(long)) != 5777401914483111267 ||
+                         *(long*)(state.StringBuffer + sizeof(long) + sizeof(long)) != 7300947924012593761 ||
+                         *(int*)(state.StringBuffer + sizeof(long) + sizeof(long) + sizeof(long)) != 1769171318 ||
+                         *(short*)(state.StringBuffer + sizeof(long) + sizeof(long) + sizeof(long) + sizeof(int)) != 28271) &&
+                        (*(long*)(state.StringBuffer + sizeof(long)) != 5921517102558967139 ||
+                         *(long*)(state.StringBuffer + sizeof(long) + sizeof(long)) != 3273676477843469925 ||
+                         *(int*)(state.StringBuffer + sizeof(long) + sizeof(long) + sizeof(long)) != 1952543827 ||
+                         *(short*)(state.StringBuffer + sizeof(long) + sizeof(long) + sizeof(long) + sizeof(int)) != 29557))
                     {
                         aboutToReadPropertyName = true;
                         return true;
@@ -673,7 +727,10 @@ namespace Raven.Server.Documents
                     break;
 
                 case 32: //Raven-Replication-Merged-History
-                    if ("Raven-Replication-Merged-History"u8.IsEqualConstant(state.StringBuffer) == false)
+                    if (*(long*)state.StringBuffer != 7300947898092904786 ||
+                        *(long*)(state.StringBuffer + sizeof(long)) != 8028075772393122928 ||
+                        *(long*)(state.StringBuffer + sizeof(long) + sizeof(long)) != 7234302117464059246 ||
+                        *(long*)(state.StringBuffer + sizeof(long) + sizeof(long) + sizeof(long)) != 8751179571877464109)
                     {
                         aboutToReadPropertyName = true;
                         return true;
