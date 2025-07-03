@@ -37,12 +37,11 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
 
     protected abstract IDisposable AllocateContextForQueryOperation(out TQueryContext queryContext, out TOperationContext context);
 
-    private async ValueTask HandleDebugAsync(IndexQueryServerSide query, TQueryContext queryContext, TOperationContext context, QueryStringParameters parameters, long? existingResultEtag, OperationCancelToken token)
+    private async ValueTask HandleDebugAsync(IndexQueryServerSide query, TQueryContext queryContext, TOperationContext context, string debug, long? existingResultEtag, OperationCancelToken token)
     {
-        var debug = parameters.Debug;
         if (string.Equals(debug, "entries", StringComparison.OrdinalIgnoreCase))
         {
-            var ignoreLimit = parameters.IgnoreLimit;
+            var ignoreLimit = RequestHandler.GetBoolValueQueryString("ignoreLimit", required: false) ?? false;
             await IndexEntriesAsync(queryContext, context, query, existingResultEtag, ignoreLimit, token);
             return;
         }
@@ -103,12 +102,15 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
             {
                 using (var token = RequestHandler.CreateHttpRequestBoundTimeLimitedOperationTokenForQuery())
                 {
-                    var parameters = QueryStringParameters.Create(HttpContext.Request);
-                    var indexQuery = await GetIndexQueryAsync(context, QueryMethod, tracker, parameters.AddSpatialProperties).AsTask();
+                    var addSpatialProperties = RequestHandler.GetBoolValueQueryString("addSpatialProperties", required: false) ?? false;
+                    var metadataOnly = RequestHandler.GetBoolValueQueryString("metadataOnly", required: false) ?? false;
+                    var shouldReturnServerSideQuery = RequestHandler.GetBoolValueQueryString("includeServerSideQuery", required: false) ?? false;
 
-                    indexQuery.Diagnostics = parameters.Diagnostics ? new List<string>() : null;
-                    indexQuery.AddTimeSeriesNames = parameters.AddTimeSeriesNames;
-                    indexQuery.DisableAutoIndexCreation = parameters.DisableAutoIndexCreation;
+                    var indexQuery = await GetIndexQueryAsync(context, QueryMethod, tracker, addSpatialProperties);
+
+                    indexQuery.Diagnostics = RequestHandler.GetBoolValueQueryString("diagnostics", required: false) ?? false ? new List<string>() : null;
+                    indexQuery.AddTimeSeriesNames = RequestHandler.GetBoolValueQueryString("addTimeSeriesNames", false) ?? false;
+                    indexQuery.DisableAutoIndexCreation = RequestHandler.GetBoolValueQueryString("disableAutoIndexCreation", false) ?? false;
 
                     if (RequestHandler.HttpContext.Request.IsFromOrchestrator())
                         indexQuery.ReturnOptions = IndexQueryServerSide.QueryResultReturnOptions.CreateForSharding(indexQuery);
@@ -116,12 +118,12 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
                     AssertIndexQuery(indexQuery);
 
                     var existingResultEtag = RequestHandler.GetLongFromHeaders(Constants.Headers.IfNoneMatch);
-
+                    var debug = RequestHandler.GetStringQueryString("debug", required: false);
                     EnsureQueryContextInitialized(queryContext, indexQuery);
 
-                    if (string.IsNullOrWhiteSpace(parameters.Debug) == false)
+                    if (string.IsNullOrWhiteSpace(debug) == false)
                     {
-                        await HandleDebugAsync(indexQuery, queryContext, context, parameters, existingResultEtag, token);
+                        await HandleDebugAsync(indexQuery, queryContext, context, debug, existingResultEtag, token);
                         return;
                     }
 
@@ -143,7 +145,7 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
                     QueryResultServerSide<TQueryResult> result = null;
                     try
                     {
-                        result = await GetQueryResultsAsync(indexQuery, queryContext, existingResultEtag, parameters.MetadataOnly, token).AsTask();
+                        result = await GetQueryResultsAsync(indexQuery, queryContext, existingResultEtag, metadataOnly, token).AsTask();
                     }
                     catch (IndexDoesNotExistException)
                     {
@@ -173,8 +175,8 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
                         {
                             result.Timings = indexQuery.Timings?.ToTimings();
 
-                            (numberOfResults, totalDocumentsSizeInBytes) = await writer.WriteDocumentQueryResultAsync(context, result, parameters.MetadataOnly,
-                                WriteAdditionalData(indexQuery, parameters.IncludeServerSideQuery), token.Token);
+                            (numberOfResults, totalDocumentsSizeInBytes) = await writer.WriteDocumentQueryResultAsync(context, result, metadataOnly,
+                                WriteAdditionalData(indexQuery, shouldReturnServerSideQuery), token.Token);
                             await writer.MaybeOuterFlushAsync();
                         }
 
@@ -315,97 +317,4 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
             HttpContext.Items[nameof(QueryTimings)] = indexQuery.Timings.ToTimings();
     }
 
-    private sealed class QueryStringParameters : AbstractQueryStringParameters
-    {
-        public bool MetadataOnly;
-
-        public bool AddSpatialProperties;
-
-        public bool IncludeServerSideQuery;
-
-        public bool Diagnostics;
-
-        public bool AddTimeSeriesNames;
-
-        public bool DisableAutoIndexCreation;
-
-        public string Debug;
-
-        public bool IgnoreLimit;
-
-        private QueryStringParameters([NotNull] HttpRequest httpRequest)
-            : base(httpRequest)
-        {
-        }
-
-        protected override void OnFinalize()
-        {
-        }
-
-        protected override void OnValue(QueryStringEnumerable.EncodedNameValuePair pair)
-        {
-            var name = pair.EncodedName;
-
-            switch (name.Length)
-            {
-                case 5:
-                {
-                    if (IsMatch(name, DebugQueryStringName))
-                        Debug = pair.DecodeValue().ToString();
-                    return;
-                }
-                case 11:
-                {
-                    if (IsMatch(name, IgnoreLimitQueryStringName))
-                    {
-                        IgnoreLimit = GetBoolValue(name, pair.EncodedValue);
-                        return;
-                    }
-
-                    if (IsMatch(name, DiagnosticsQueryStringName))
-                        Diagnostics = GetBoolValue(name, pair.EncodedValue);
-                    
-                    return;
-                }
-                case 12:
-                {
-                    if (IsMatch(name, MetadataOnlyQueryStringName))
-                        MetadataOnly = GetBoolValue(name, pair.EncodedValue);
-                    return;
-                }
-                case 18:
-                {
-                    if (IsMatch(name, AddTimeSeriesNamesQueryStringName))
-                        AddTimeSeriesNames = GetBoolValue(name, pair.EncodedValue);
-                    return;
-                }
-                case 20:
-                {
-                    if (IsMatch(name, AddSpatialPropertiesQueryStringName))
-                        AddSpatialProperties = GetBoolValue(name, pair.EncodedValue);
-                    return;
-                }
-                case 22:
-                {
-                    if (IsMatch(name, IncludeServerSideQueryQueryStringName))
-                        IncludeServerSideQuery = GetBoolValue(name, pair.EncodedValue);
-                    return;
-                }
-                case 24:
-                {
-                    if (IsMatch(name, DisableAutoIndexCreationQueryStringName))
-                        DisableAutoIndexCreation = GetBoolValue(name, pair.EncodedValue);
-                    return;
-                }
-            }
-        }
-
-        public static QueryStringParameters Create(HttpRequest httpRequest)
-        {
-            var parameters = new QueryStringParameters(httpRequest);
-            parameters.Parse();
-
-            return parameters;
-        }
-    }
 }

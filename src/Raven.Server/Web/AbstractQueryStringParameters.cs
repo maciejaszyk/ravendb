@@ -50,35 +50,7 @@ internal abstract class AbstractQueryStringParameters(HttpRequest httpRequest)
     protected static readonly ReadOnlyMemory<char> CountTypeQueryStringName = "countType".AsMemory();
 
     protected static readonly ReadOnlyMemory<char> CountValueQueryStringName = "countValue".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> AddSpatialPropertiesQueryStringName = "addSpatialProperties".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> IncludeServerSideQueryQueryStringName = "includeServerSideQuery".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> DiagnosticsQueryStringName = "diagnostics".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> AddTimeSeriesNamesQueryStringName = "addTimeSeriesNames".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> DisableAutoIndexCreationQueryStringName = "disableAutoIndexCreation".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> DebugQueryStringName = "debug".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> IgnoreLimitQueryStringName = "ignoreLimit".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> NoReplyQueryStringName = "noreply".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> WaitForIndexesTimeoutQueryStringName = "waitForIndexesTimeout".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> WaitForIndexThrowQueryStringName = "waitForIndexThrow".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> WaitForSpecificIndexQueryStringName = "waitForSpecificIndex".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> WaitForReplicasTimeoutQueryStringName = "waitForReplicasTimeout".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> NumberOfReplicasToWaitForQueryStringName = "numberOfReplicasToWaitFor".AsMemory();
-
-    protected static readonly ReadOnlyMemory<char> ThrowOnTimeoutInWaitForReplicasQueryStringName = "throwOnTimeoutInWaitForReplicas".AsMemory();
-
+    
     private Dictionary<string, List<string>> _tempStringValues;
 
     protected void Parse()
@@ -87,8 +59,6 @@ internal abstract class AbstractQueryStringParameters(HttpRequest httpRequest)
             OnValue(pair);
 
         OnFinalize();
-
-        _tempStringValues = null;
     }
 
     protected void AddForStringValues(string name, ReadOnlyMemory<char> value)
@@ -121,13 +91,9 @@ internal abstract class AbstractQueryStringParameters(HttpRequest httpRequest)
         return name.Span.Equals(expectedName.Span, StringComparison.OrdinalIgnoreCase);
     }
 
-    protected static bool GetBoolValue(ReadOnlyMemory<char> name, ReadOnlyMemory<char> value)
+    protected static bool GetBoolValue(ReadOnlyMemory<char> name)
     {
-        if (bool.TryParse(value.Span, out var result))
-            return result;
-
-        ThrowInvalidBool(name, value);
-        return default;
+        return bool.Parse(name.Span);
     }
 
     protected static int GetIntValue(ReadOnlyMemory<char> name, ReadOnlyMemory<char> value)
