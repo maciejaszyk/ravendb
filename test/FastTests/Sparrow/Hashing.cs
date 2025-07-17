@@ -2,11 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
-using FastTests.Voron.FixedSize;
 using Sparrow;
 using Sparrow.Binary;
 using Sparrow.Server;
-using Tests.Infrastructure;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -18,7 +16,7 @@ namespace FastTests.Sparrow
         {
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void XXHash64_UseActualValues()
         {
             var r1 = Hashing.XXHash64.CalculateRaw("Public");
@@ -27,7 +25,7 @@ namespace FastTests.Sparrow
             Assert.Equal(r1, r2);
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void XXHash32_UseActualValues()
         {
             var r1 = Hashing.XXHash32.CalculateRaw("Public");
@@ -38,7 +36,7 @@ namespace FastTests.Sparrow
             Assert.Equal(r2, r3);
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void Marvin32_UseActualValues()
         {
             byte[] value = { (byte)'A', 0, (byte)'b', 0, (byte)'c', 0, (byte)'d', 0, (byte)'e', 0, (byte)'f', 0, (byte)'g', 0, }; /* "Abcdefg" in UTF-16-LE */
@@ -50,7 +48,7 @@ namespace FastTests.Sparrow
         }
 
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void XXHash32_UseLongActualValues()
         {
             var r1 = Hashing.XXHash32.CalculateRaw("PublicPublicPublicPublic");
@@ -62,7 +60,7 @@ namespace FastTests.Sparrow
         }
 
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public unsafe void XXHash32_EqualityImplementationPointerAndSpan()
         {
             var rng = new Random();
@@ -84,7 +82,7 @@ namespace FastTests.Sparrow
             }
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void XXHash32()
         {
             string value = "abcd";
@@ -115,7 +113,7 @@ namespace FastTests.Sparrow
         }
 
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void Marvin32()
         {
             byte[] test = { (byte)'A', 0, (byte)'b', 0, (byte)'c', 0, (byte)'d', 0, (byte)'e', 0, (byte)'f', 0, (byte)'g', 0, }; /* "Abcdefg" in UTF-16-LE */
@@ -123,7 +121,7 @@ namespace FastTests.Sparrow
             Assert.Equal(r, 0xba627c81);
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public unsafe void Marvin32_IntArrayEquivalence()
         {
             int[] test = { 32, 5, 11588, 5 }; /* "Abcdefg" in UTF-16-LE */
@@ -138,7 +136,7 @@ namespace FastTests.Sparrow
         }
 
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void XXHash32_EquivalenceInDifferentMemoryLocations()
         {
             string value = "abcd";
@@ -157,7 +155,7 @@ namespace FastTests.Sparrow
             Assert.Equal(expected, result);
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void XXHash64_EquivalenceInDifferentMemoryLocationsXXHash64()
         {
             string value = "abcd";
@@ -176,7 +174,7 @@ namespace FastTests.Sparrow
             Assert.Equal(expected, result);
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void XXHash32_NotEquivalenceOfBytesWithString()
         {
             string value = "abcd";
@@ -196,7 +194,7 @@ namespace FastTests.Sparrow
         }
 
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public void XXHash64_NotEquivalenceOfBytesWithString()
         {
             string value = "abcd";
@@ -215,7 +213,7 @@ namespace FastTests.Sparrow
             Assert.NotEqual(expected, result);
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+        [Fact]
         public unsafe void EnsureZeroLengthStringIsAValidHash()
         {
             byte[] zeroLength = Array.Empty<byte>();
@@ -241,7 +239,29 @@ namespace FastTests.Sparrow
             }
         }
 
-        [RavenFact(RavenTestCategory.Core)]
+
+
+
+        public static IEnumerable<object[]> BufferSize
+        {
+            get
+            {
+                return new[]
+                {
+                    new object[] {1},
+                    new object[] {4},
+                    new object[] {15},
+                    new object[] {65},
+                    new object[] {90},
+                    new object[] {128},
+                    new object[] {129},
+                    new object[] {1000},
+                    new object[] {Random.Shared.Next(10000)}
+                };
+            }
+        }
+
+        [Fact]
         public void Combine()
         {
             int h1 = Hashing.HashCombiner.CombineInline(1991, 13);
@@ -249,16 +269,16 @@ namespace FastTests.Sparrow
             Assert.NotEqual(h1, h2);
         }
 
-        [RavenTheory(RavenTestCategory.Core)]
-        [InlineDataWithRandomSeed]
-        public unsafe void XXHash64_StreamedHashingEquivalence(int randomSeed)
+        [Theory]
+        [MemberData("BufferSize")]
+        public unsafe void XXHash64_StreamedHashingEquivalence(int bufferSize)
         {
-            var rnd = new Random(randomSeed);
-            var bufferSize = rnd.Next(1, 1000);
-            var seed = (ulong)rnd.Next();
+            var rnd = new Random(1000);
 
             byte[] values = new byte[bufferSize];
             rnd.NextBytes(values);
+
+            uint seed = 233;
 
             int blockSize;
             int iteration = 1;
@@ -266,7 +286,7 @@ namespace FastTests.Sparrow
             {
                 blockSize = Hashing.Streamed.XXHash64.Alignment * iteration;
 
-                var context = new Hashing.Streamed.XXHash64Context { Seed = seed };
+                var context = new Hashing.Streamed.XXHash64Context {Seed = seed};
                 Hashing.Streamed.XXHash64.Begin(ref context);
                 fixed (byte* buffer = values)
                 {
@@ -291,23 +311,20 @@ namespace FastTests.Sparrow
             while (blockSize <= bufferSize);
         }
 
-        [RavenTheory(RavenTestCategory.Core)]
-        [InlineDataWithRandomSeed]
-        public unsafe void XXHash64_HashingEquivalenceWithReference(int randomSeed)
+        [Fact]
+        public unsafe void XXHash64_HashingEquivalenceWithReference()
         {
-            var rnd = new Random(randomSeed);
-            var bufferSize = rnd.Next(1, 1000);
-            var seed = (ulong)rnd.Next();
+            var rnd = new Random(1000);
 
-            byte[] values = new byte[bufferSize];
+            byte[] values = new byte[1024];
             rnd.NextBytes(values);
 
             fixed (byte* valuePtr = values)
             {
                 for (int i = 1; i < values.Length; i++)
                 {
-                    var expected = XXHash64Reference(valuePtr, (ulong)i, seed: seed);
-                    var result = Hashing.XXHash64.CalculateInline(values.AsSpan().Slice(0, i), seed);
+                    var expected = XXHash64Reference(valuePtr, (ulong)i, seed: 1337);
+                    var result = Hashing.XXHash64.CalculateInline(values.AsSpan().Slice(0, i), 1337);
 
                     Assert.Equal(expected, result);
 
@@ -425,23 +442,20 @@ namespace FastTests.Sparrow
         }
 
 
-        [RavenTheory(RavenTestCategory.Core)]
-        [InlineDataWithRandomSeed]
-        public unsafe void XXHash32_HashingEquivalenceWithReference(int randomSeed)
+        [Fact]
+        public unsafe void XXHash32_HashingEquivalenceWithReference()
         {
-            var rnd = new Random(randomSeed);
-            var bufferSize = rnd.Next(1, 1000);
-            var seed = (uint)rnd.Next();
+            var rnd = new Random(1000);
 
-            byte[] values = new byte[bufferSize];
+            byte[] values = new byte[1024];
             rnd.NextBytes(values);
 
             fixed (byte* valuePtr = values)
             {
                 for (int i = 1; i < values.Length; i++)
                 {
-                    var expected = XXHash32Reference(valuePtr, i, seed: seed);
-                    var result = Hashing.XXHash32.CalculateInline(values.AsSpan().Slice(0, i), seed);
+                    var expected = XXHash32Reference(valuePtr, i, seed: 1337);
+                    var result = Hashing.XXHash32.CalculateInline(values.AsSpan().Slice(0, i), 1337);
 
                     Assert.Equal(expected, result);
                 }
