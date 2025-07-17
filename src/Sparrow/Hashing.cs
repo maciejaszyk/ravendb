@@ -7,6 +7,32 @@ using System.Text;
 
 namespace Sparrow
 {
+    internal struct Metro128Hash
+    {
+        public ulong H1;
+        public ulong H2;
+
+        public Metro128Hash(ulong h1, ulong h2)
+        {
+            H1 = h1;
+            H2 = h2;
+        }
+
+        public byte[] ToByteArray()
+        {
+            var result = new byte[sizeof(ulong) * 2];
+            unsafe
+            {
+                fixed( byte* ptr = result )
+                {
+                    ((ulong*)ptr)[0] = H1;
+                    ((ulong*)ptr)[1] = H2;
+                }
+            }
+            return result;
+        }
+    }
+
     internal static unsafe partial class Hashing
     {
         #region XXHash32 & XXHash64
@@ -51,25 +77,16 @@ namespace Sparrow
 
             // TODO: Check if it is better to have ReadOnlySpan built on top of pointer or the other way around. 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public static uint CalculateInline(ReadOnlySpan<byte> source, uint seed = 0)
+            public static uint CalculateInline(ReadOnlySpan<byte> buffer, uint seed = 0)
             {
                 uint h32;
 
-                // This line is needed because if the ReadOnlySpan<byte> is null then the reference will be 0x0000000000
-                // and since we subtract from start for finding the end it can make Unsafe.IsAddressLessThan() misbehave.
-                // We can easily sidestep the issue of just setting the empty array when the request of the hash value of
-                // an empty array is requested (absurdly rare) so highly predictable branch. 
-                nuint len = (nuint)source.Length;
-                if (len == 0)
-                    source = Array.Empty<byte>();
+                ReadOnlySpan<uint> uintBuffer = MemoryMarshal.Cast<byte, uint>(buffer);
 
-                ref byte start = ref MemoryMarshal.GetReference(source);
-
-                ref byte buffer = ref start;
-
-                if (len >= 4 * sizeof(uint))
+                int idx = 0;
+                if (uintBuffer.Length >= 4)
                 {
-                    ref byte limit = ref Unsafe.AddByteOffset(ref start, len - 4 * sizeof(uint) + 1);
+                    int limit = uintBuffer.Length - 4;
 
                     uint v1 = seed + XXHash32Constants.PRIME32_1 + XXHash32Constants.PRIME32_2;
                     uint v2 = seed + XXHash32Constants.PRIME32_2;
@@ -78,14 +95,24 @@ namespace Sparrow
 
                     do
                     {
-                        v1 = Bits.RotateLeft32(v1 + Unsafe.ReadUnaligned<uint>(ref Unsafe.AddByteOffset(ref buffer, 0 * sizeof(uint))) * XXHash32Constants.PRIME32_2, 13) * XXHash32Constants.PRIME32_1;
-                        v2 = Bits.RotateLeft32(v2 + Unsafe.ReadUnaligned<uint>(ref Unsafe.AddByteOffset(ref buffer, 1 * sizeof(uint))) * XXHash32Constants.PRIME32_2, 13) * XXHash32Constants.PRIME32_1;
-                        v3 = Bits.RotateLeft32(v3 + Unsafe.ReadUnaligned<uint>(ref Unsafe.AddByteOffset(ref buffer, 2 * sizeof(uint))) * XXHash32Constants.PRIME32_2, 13) * XXHash32Constants.PRIME32_1;
-                        v4 = Bits.RotateLeft32(v4 + Unsafe.ReadUnaligned<uint>(ref Unsafe.AddByteOffset(ref buffer, 3 * sizeof(uint))) * XXHash32Constants.PRIME32_2, 13) * XXHash32Constants.PRIME32_1;
+                        v1 += uintBuffer[idx + 0] * XXHash32Constants.PRIME32_2;
+                        v2 += uintBuffer[idx + 1] * XXHash32Constants.PRIME32_2;
+                        v3 += uintBuffer[idx + 2] * XXHash32Constants.PRIME32_2;
+                        v4 += uintBuffer[idx + 3] * XXHash32Constants.PRIME32_2;
 
-                        buffer = ref Unsafe.AddByteOffset(ref buffer, 4 * sizeof(uint));
+                        idx += 4;
+
+                        v1 = Bits.RotateLeft32(v1, 13);
+                        v2 = Bits.RotateLeft32(v2, 13);
+                        v3 = Bits.RotateLeft32(v3, 13);
+                        v4 = Bits.RotateLeft32(v4, 13);
+
+                        v1 *= XXHash32Constants.PRIME32_1;
+                        v2 *= XXHash32Constants.PRIME32_1;
+                        v3 *= XXHash32Constants.PRIME32_1;
+                        v4 *= XXHash32Constants.PRIME32_1;
                     }
-                    while (Unsafe.IsAddressLessThan(ref buffer, ref limit));
+                    while (idx <= limit);
 
                     h32 = Bits.RotateLeft32(v1, 1) + Bits.RotateLeft32(v2, 7) + Bits.RotateLeft32(v3, 12) + Bits.RotateLeft32(v4, 18);
                 }
@@ -94,21 +121,22 @@ namespace Sparrow
                     h32 = seed + XXHash32Constants.PRIME32_5;
                 }
 
-                h32 += (uint)len;
+                h32 += (uint)buffer.Length;
 
-                ref byte bEnd = ref Unsafe.AddByteOffset(ref start, len - sizeof(uint) + 1);
-
-                while (Unsafe.IsAddressLessThan(ref buffer, ref bEnd))
+                while (idx + 1 <= uintBuffer.Length)
                 {
-                    h32 = Bits.RotateLeft32(h32 + Unsafe.ReadUnaligned<uint>(ref buffer) * XXHash32Constants.PRIME32_3, 17) * XXHash32Constants.PRIME32_4;
-                    buffer = ref Unsafe.AddByteOffset(ref buffer, sizeof(uint));
+                    h32 += uintBuffer[idx] * XXHash32Constants.PRIME32_3;
+                    h32 = Bits.RotateLeft32(h32, 17) * XXHash32Constants.PRIME32_4;
+                    idx += 1;
                 }
 
-                bEnd = ref Unsafe.AddByteOffset(ref start, len);
-                while (Unsafe.IsAddressLessThan(ref buffer, ref bEnd))
+                idx *= 4;
+
+                while (idx < buffer.Length)
                 {
-                    h32 = Bits.RotateLeft32(h32 + buffer * XXHash32Constants.PRIME32_5, 11) * XXHash32Constants.PRIME32_1;
-                    buffer = ref Unsafe.AddByteOffset(ref buffer, sizeof(byte));
+                    h32 += buffer[idx] * XXHash32Constants.PRIME32_5;
+                    h32 = Bits.RotateLeft32(h32, 11) * XXHash32Constants.PRIME32_1;
+                    idx++;
                 }
 
                 h32 ^= h32 >> 15;
@@ -123,23 +151,96 @@ namespace Sparrow
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static uint CalculateInline(byte* buffer, int len, uint seed = 0)
             {
-                return CalculateInline(new ReadOnlySpan<byte>(buffer, len), seed);
+                unchecked
+                {
+                    uint h32;
+
+                    byte* bEnd = buffer + len;
+
+                    if (len >= 16)
+                    {
+                        byte* limit = bEnd - 16;
+
+                        uint v1 = seed + XXHash32Constants.PRIME32_1 + XXHash32Constants.PRIME32_2;
+                        uint v2 = seed + XXHash32Constants.PRIME32_2;
+                        uint v3 = seed + 0;
+                        uint v4 = seed - XXHash32Constants.PRIME32_1;
+
+                        do
+                        {
+                            v1 += ((uint*)buffer)[0] * XXHash32Constants.PRIME32_2;
+                            v2 += ((uint*)buffer)[1] * XXHash32Constants.PRIME32_2;
+                            v3 += ((uint*)buffer)[2] * XXHash32Constants.PRIME32_2;
+                            v4 += ((uint*)buffer)[3] * XXHash32Constants.PRIME32_2;
+
+                            buffer += 4 * sizeof(uint);
+
+                            v1 = Bits.RotateLeft32(v1, 13);
+                            v2 = Bits.RotateLeft32(v2, 13);
+                            v3 = Bits.RotateLeft32(v3, 13);
+                            v4 = Bits.RotateLeft32(v4, 13);
+
+                            v1 *= XXHash32Constants.PRIME32_1;
+                            v2 *= XXHash32Constants.PRIME32_1;
+                            v3 *= XXHash32Constants.PRIME32_1;
+                            v4 *= XXHash32Constants.PRIME32_1;
+                        }
+                        while (buffer <= limit);
+
+                        h32 = Bits.RotateLeft32(v1, 1) + Bits.RotateLeft32(v2, 7) + Bits.RotateLeft32(v3, 12) + Bits.RotateLeft32(v4, 18);
+                    }
+                    else
+                    {
+                        h32 = seed + XXHash32Constants.PRIME32_5;
+                    }
+
+                    h32 += (uint)len;
+
+                    while (buffer + 4 <= bEnd)
+                    {
+                        h32 += *((uint*)buffer) * XXHash32Constants.PRIME32_3;
+                        h32 = Bits.RotateLeft32(h32, 17) * XXHash32Constants.PRIME32_4;
+                        buffer += 4;
+                    }
+
+                    while (buffer < bEnd)
+                    {
+                        h32 += (uint)(*buffer) * XXHash32Constants.PRIME32_5;
+                        h32 = Bits.RotateLeft32(h32, 11) * XXHash32Constants.PRIME32_1;
+                        buffer++;
+                    }
+
+                    h32 ^= h32 >> 15;
+                    h32 *= XXHash32Constants.PRIME32_2;
+                    h32 ^= h32 >> 13;
+                    h32 *= XXHash32Constants.PRIME32_3;
+                    h32 ^= h32 >> 16;
+
+                    return h32;
+                }
             }
 
             public static uint Calculate(byte* buffer, int len, uint seed = 0)
             {
-                return CalculateInline(new ReadOnlySpan<byte>(buffer, len), seed);
+                return CalculateInline(buffer, len, seed);
             }
 
             public static uint Calculate(string value, Encoding encoder, uint seed = 0)
             {
                 var buf = encoder.GetBytes(value);
-                return CalculateInline(buf.AsSpan(), seed);
+
+                fixed (byte* buffer = buf)
+                {
+                    return CalculateInline(buffer, buf.Length, seed);
+                }
             }
 
             public static uint CalculateRaw(string buffer, uint seed = 0)
             {
-                return CalculateInline(MemoryMarshal.Cast<char, byte>(buffer.AsSpan()), seed);
+                fixed (char* bufferPtr = buffer)
+                {
+                    return CalculateInline((byte*)bufferPtr, buffer.Length * sizeof(char), seed);
+                }
             }
 
             public static uint Calculate(string buffer, uint seed = 0)
@@ -232,20 +333,24 @@ namespace Sparrow
 
             public static uint Calculate(byte[] buf, int len = -1, uint seed = 0)
             {
-                var buffer = buf.AsSpan();
-                if (len > -1)
-                    buffer = buffer.Slice(0, len);
+                if (len == -1)
+                    len = buf.Length;
 
-                return CalculateInline(buffer, seed);
+                fixed (byte* buffer = buf)
+                {
+                    return CalculateInline(buffer, len, seed);
+                }
             }
 
             public static uint Calculate(int[] buf, int len = -1, uint seed = 0)
             {
-                var buffer = buf.AsSpan();
-                if (len > -1)
-                    buffer = buffer.Slice(0, len);
+                if (len == -1)
+                    len = buf.Length;
 
-                return CalculateInline(MemoryMarshal.Cast<int, byte>(buffer), seed);
+                fixed (int* buffer = buf)
+                {
+                    return Calculate((byte*)buffer, len * sizeof(int), seed);
+                }
             }
         }
 
@@ -299,26 +404,15 @@ namespace Sparrow
             // of integer size. 
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public static ulong CalculateInline(ReadOnlySpan<byte> source, ulong seed = 0)
+            public static ulong CalculateInline(byte* buffer, ulong len, ulong seed = 0)
             {
                 ulong h64;
 
-                nuint len = (nuint)source.Length;
-
-                // This line is needed because if the ReadOnlySpan<byte> is null then the reference will be 0x0000000000
-                // and since we subtract from start for finding the end it can make Unsafe.IsAddressLessThan() misbehave.
-                // We can easily sidestep the issue of just setting the empty array when the request of the hash value of
-                // an empty array is requested (absurdly rare) so highly predictable branch. 
-                if (len == 0)
-                    source = Array.Empty<byte>();
-
-                ref byte start = ref MemoryMarshal.GetReference(source);
-                
-                ref byte buffer = ref start;
+                byte* bEnd = buffer + len;
 
                 if (len >= 32)
                 {
-                    ref byte limit = ref Unsafe.AddByteOffset(ref start, len - 32 + 1);
+                    byte* limit = bEnd - 32;
 
                     ulong v1 = seed + XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_2;
                     ulong v2 = seed + XXHash64Constants.PRIME64_2;
@@ -327,21 +421,41 @@ namespace Sparrow
 
                     do
                     {
-                        v1 = Bits.RotateLeft64(v1 + Unsafe.ReadUnaligned<ulong>(ref Unsafe.AddByteOffset(ref buffer, 0 * sizeof(ulong))) * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                        v2 = Bits.RotateLeft64(v2 + Unsafe.ReadUnaligned<ulong>(ref Unsafe.AddByteOffset(ref buffer, 1 * sizeof(ulong))) * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                        v3 = Bits.RotateLeft64(v3 + Unsafe.ReadUnaligned<ulong>(ref Unsafe.AddByteOffset(ref buffer, 2 * sizeof(ulong))) * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                        v4 = Bits.RotateLeft64(v4 + Unsafe.ReadUnaligned<ulong>(ref Unsafe.AddByteOffset(ref buffer, 3 * sizeof(ulong))) * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
+                        v1 += ((ulong*)buffer)[0] * XXHash64Constants.PRIME64_2;
+                        v2 += ((ulong*)buffer)[1] * XXHash64Constants.PRIME64_2;
+                        v3 += ((ulong*)buffer)[2] * XXHash64Constants.PRIME64_2;
+                        v4 += ((ulong*)buffer)[3] * XXHash64Constants.PRIME64_2;
 
-                        buffer = ref Unsafe.AddByteOffset(ref buffer, 4 * sizeof(ulong));
+                        buffer += 4 * sizeof(ulong);
+
+                        v1 = Bits.RotateLeft64(v1, 31);
+                        v2 = Bits.RotateLeft64(v2, 31);
+                        v3 = Bits.RotateLeft64(v3, 31);
+                        v4 = Bits.RotateLeft64(v4, 31);
+
+                        v1 *= XXHash64Constants.PRIME64_1;
+                        v2 *= XXHash64Constants.PRIME64_1;
+                        v3 *= XXHash64Constants.PRIME64_1;
+                        v4 *= XXHash64Constants.PRIME64_1;
                     }
-                    while (Unsafe.IsAddressLessThan(ref buffer, ref limit));
+                    while (buffer <= limit);
 
                     h64 = Bits.RotateLeft64(v1, 1) + Bits.RotateLeft64(v2, 7) + Bits.RotateLeft64(v3, 12) + Bits.RotateLeft64(v4, 18);
 
-                    v1 = Bits.RotateLeft64(v1 * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                    v2 = Bits.RotateLeft64(v2 * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                    v3 = Bits.RotateLeft64(v3 * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                    v4 = Bits.RotateLeft64(v4 * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
+                    v1 *= XXHash64Constants.PRIME64_2;
+                    v2 *= XXHash64Constants.PRIME64_2;
+                    v3 *= XXHash64Constants.PRIME64_2;
+                    v4 *= XXHash64Constants.PRIME64_2;
+
+                    v1 = Bits.RotateLeft64(v1, 31);
+                    v2 = Bits.RotateLeft64(v2, 31);
+                    v3 = Bits.RotateLeft64(v3, 31);
+                    v4 = Bits.RotateLeft64(v4, 31);
+
+                    v1 *= XXHash64Constants.PRIME64_1;
+                    v2 *= XXHash64Constants.PRIME64_1;
+                    v3 *= XXHash64Constants.PRIME64_1;
+                    v4 *= XXHash64Constants.PRIME64_1;
 
                     h64 ^= v1;
                     h64 = h64 * XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_4;
@@ -362,109 +476,29 @@ namespace Sparrow
 
                 h64 += (ulong)len;
 
-                ref byte bEnd = ref Unsafe.AddByteOffset(ref start, len - sizeof(ulong) + 1);
-
-                while (Unsafe.IsAddressLessThan(ref buffer, ref bEnd))
-                {
-                    var k1 = Bits.RotateLeft64(Unsafe.ReadUnaligned<ulong>(ref buffer) * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                    h64 = Bits.RotateLeft64(h64 ^ k1, 27) * XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_4;
-
-                    buffer = ref Unsafe.AddByteOffset(ref buffer, sizeof(ulong));
-                }
-
-                bEnd = ref Unsafe.AddByteOffset(ref start, len - sizeof(uint) + 1);
-                if (Unsafe.IsAddressLessThan(ref buffer, ref bEnd))
-                {
-                    h64 = Bits.RotateLeft64(h64 ^ (Unsafe.ReadUnaligned<uint>(ref buffer) * XXHash64Constants.PRIME64_1), 23) * XXHash64Constants.PRIME64_2 + XXHash64Constants.PRIME64_3;
-
-                    buffer = ref Unsafe.AddByteOffset(ref buffer, sizeof(uint));
-                }
-
-                bEnd = ref Unsafe.AddByteOffset(ref start, len);
-                while (Unsafe.IsAddressLessThan(ref buffer, ref bEnd))
-                {
-                    h64 ^= buffer * XXHash64Constants.PRIME64_5;
-                    h64 = Bits.RotateLeft64(h64, 11) * XXHash64Constants.PRIME64_1;
-                    
-                    buffer = ref Unsafe.AddByteOffset(ref buffer, sizeof(byte));
-                }
-
-                h64 ^= h64 >> 33;
-                h64 *= XXHash64Constants.PRIME64_2;
-                h64 ^= h64 >> 29;
-                h64 *= XXHash64Constants.PRIME64_3;
-                h64 ^= h64 >> 32;
-
-                return h64;
-            }
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public static ulong CalculateInline(byte* buffer, ulong len, ulong seed = 0)
-            {
-                // RavenDB-21728: This version of hashing is more general and is able to handle the 'unlikely' case
-                // of having to hash beyond the int.MaxValue size supported by the Span implementation therefore it can
-                // only accept a pointer and a ulong as length. 
-
-                ulong h64;
-
-                byte* bEnd = buffer + len;
-
-                if (len >= 32)
-                {
-                    byte* limit = bEnd - 32;
-
-                    ulong v1 = seed + XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_2;
-                    ulong v2 = seed + XXHash64Constants.PRIME64_2;
-                    ulong v3 = seed + 0;
-                    ulong v4 = seed - XXHash64Constants.PRIME64_1;
-
-                    do
-                    {
-                        v1 = Bits.RotateLeft64(v1 + ((ulong*)buffer)[0] * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                        v2 = Bits.RotateLeft64(v2 + ((ulong*)buffer)[1] * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                        v3 = Bits.RotateLeft64(v3 + ((ulong*)buffer)[2] * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                        v4 = Bits.RotateLeft64(v4 + ((ulong*)buffer)[3] * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-
-                        buffer += 4 * sizeof(ulong);
-                    }
-                    while (buffer <= limit);
-
-                    h64 = Bits.RotateLeft64(v1, 1) + Bits.RotateLeft64(v2, 7) + Bits.RotateLeft64(v3, 12) + Bits.RotateLeft64(v4, 18);
-
-                    v1 = Bits.RotateLeft64(v1 * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                    v2 = Bits.RotateLeft64(v2 * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                    v3 = Bits.RotateLeft64(v3 * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                    v4 = Bits.RotateLeft64(v4 * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-
-                    h64 = (h64 ^ v1) * XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_4;
-                    h64 = (h64 ^ v2) * XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_4;
-                    h64 = (h64 ^ v3) * XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_4;
-                    h64 = (h64 ^ v4) * XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_4;
-                }
-                else
-                {
-                    h64 = seed + XXHash64Constants.PRIME64_5;
-                }
-
-                h64 += (ulong)len;
-
 
                 while (buffer + 8 <= bEnd)
                 {
-                    var k1 = Bits.RotateLeft64(*((ulong*)buffer) * XXHash64Constants.PRIME64_2, 31) * XXHash64Constants.PRIME64_1;
-                    h64 = Bits.RotateLeft64(h64 ^ k1, 27) * XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_4;
+                    ulong k1 = *((ulong*)buffer);
+                    k1 *= XXHash64Constants.PRIME64_2;
+                    k1 = Bits.RotateLeft64(k1, 31);
+                    k1 *= XXHash64Constants.PRIME64_1;
+                    h64 ^= k1;
+                    h64 = Bits.RotateLeft64(h64, 27) * XXHash64Constants.PRIME64_1 + XXHash64Constants.PRIME64_4;
                     buffer += 8;
                 }
 
                 if (buffer + 4 <= bEnd)
                 {
-                    h64 = Bits.RotateLeft64(h64 ^ (*(uint*)buffer * XXHash64Constants.PRIME64_1), 23) * XXHash64Constants.PRIME64_2 + XXHash64Constants.PRIME64_3;
+                    h64 ^= *(uint*)buffer * XXHash64Constants.PRIME64_1;
+                    h64 = Bits.RotateLeft64(h64, 23) * XXHash64Constants.PRIME64_2 + XXHash64Constants.PRIME64_3;
                     buffer += 4;
                 }
 
                 while (buffer < bEnd)
                 {
-                    h64 = Bits.RotateLeft64(h64 ^ (*buffer * XXHash64Constants.PRIME64_5), 11) * XXHash64Constants.PRIME64_1;
+                    h64 ^= ((ulong)*buffer) * XXHash64Constants.PRIME64_5;
+                    h64 = Bits.RotateLeft64(h64, 11) * XXHash64Constants.PRIME64_1;
                     buffer++;
                 }
 
@@ -477,59 +511,70 @@ namespace Sparrow
                 return h64;
             }
 
-            public static ulong Calculate(byte* buffer, ulong len, ulong seed = 0)
+            public static unsafe ulong Calculate(byte* buffer, ulong len, ulong seed = 0)
             {
                 return CalculateInline(buffer, len, seed);
             }
 
-            public static ulong Calculate(byte* buffer, int len, ulong seed = 0)
-            {
-                return CalculateInline(new ReadOnlySpan<byte>(buffer, len), seed);
-            }
-
             public static ulong Calculate(string value, Encoding encoder, ulong seed = 0)
             {
-                var buffer = encoder.GetBytes(value);
-                return CalculateInline(buffer.AsSpan(), seed);
+                var buf = encoder.GetBytes(value);
+
+                fixed (byte* buffer = buf)
+                {
+                    return CalculateInline(buffer, (ulong)buf.Length, seed);
+                }
             }
 
             public static ulong Calculate(string value, UTF8Encoding encoder, ulong seed = 0)
             {
-                var buffer = encoder.GetBytes(value);
-                return CalculateInline(buffer.AsSpan(), seed);
+                var buf = encoder.GetBytes(value);
+
+                fixed (byte* buffer = buf)
+                {
+                    return CalculateInline(buffer, (ulong)buf.Length, seed);
+                }
             }
 
             public static ulong CalculateRaw(string buf, ulong seed = 0)
             {
-                return CalculateInline(MemoryMarshal.Cast<char, byte>(buf.AsSpan()), seed);
+                fixed (char* buffer = buf)
+                {
+                    return CalculateInline((byte*)buffer, (ulong)(buf.Length * sizeof(char)), seed);
+                }
             }
 
             public static ulong Calculate(ReadOnlySpan<byte> buf, int len = -1, ulong seed = 0)
             {
-                var buffer = buf;
-                if (len > -1)
-                    buffer = buffer.Slice(0, len);
+                if (len == -1)
+                    len = buf.Length;
 
-                return CalculateInline(buffer, seed);
+                fixed (byte* buffer = buf)
+                {
+                    return CalculateInline(buffer, (ulong)len, seed);
+                }
             }
 
-            
             public static ulong Calculate(byte[] buf, int len = -1, ulong seed = 0)
             {
-                var buffer = buf.AsSpan();
-                if (len > -1)
-                    buffer = buffer.Slice(0, len);
+                if (len == -1)
+                    len = buf.Length;
 
-                return CalculateInline(buffer, seed);
+                fixed (byte* buffer = buf)
+                {
+                    return CalculateInline(buffer, (ulong)len, seed);
+                }
             }
 
             public static ulong Calculate(int[] buf, int len = -1, ulong seed = 0)
             {
-                var buffer = MemoryMarshal.Cast<int, byte>(buf.AsSpan());
-                if (len > -1)
-                    buffer = buffer.Slice(0, len * sizeof(int));
+                if (len == -1)
+                    len = buf.Length;
 
-                return CalculateInline(buffer, seed);
+                fixed (int* buffer = buf)
+                {
+                    return CalculateInline((byte*)buffer, (ulong)(len * sizeof(int)), seed);
+                }
             }
         }
 
@@ -774,6 +819,158 @@ namespace Sparrow
             key = key + (key << 6);
             key = key ^ (key >> 22);
             return (int)key;
+        }
+
+        #endregion
+
+        #region Metro128
+
+        internal struct Metro128Values
+        {
+            public ulong V0;
+            public ulong V1;
+            public ulong V2;
+            public ulong V3;
+        }
+
+        internal static class Metro128Constants
+        {                       
+            public const ulong K0 = 0xC83A91E1;
+            public const ulong K1 = 0x8648DBDB;
+            public const ulong K2 = 0x7BDEC03B;
+            public const ulong K3 = 0x2F5870A5;
+        }
+
+        internal static class Metro128
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static unsafe Metro128Hash CalculateInline(byte* buffer, int length, ulong seed = 0)
+            {
+                byte* ptr = buffer;
+                byte* end = ptr + length;
+
+                ulong v0 = (seed - Metro128Constants.K0) * Metro128Constants.K3;
+                ulong v1 = (seed + Metro128Constants.K1) * Metro128Constants.K2;
+
+                if (length >= 32)
+                {
+                    ulong v2 = (seed + Metro128Constants.K0) * Metro128Constants.K2;
+                    ulong v3 = (seed - Metro128Constants.K1) * Metro128Constants.K3;
+
+                    do
+                    {
+                        v0 += ((ulong*)ptr)[0] * Metro128Constants.K0;
+                        v1 += ((ulong*)ptr)[1] * Metro128Constants.K1;
+
+                        v0 = Bits.RotateRight64(v0, 29) + v2;
+                        v1 = Bits.RotateRight64(v1, 29) + v3;
+
+                        v2 += ((ulong*)ptr)[2] * Metro128Constants.K2;
+                        v3 += ((ulong*)ptr)[3] * Metro128Constants.K3;
+
+                        v2 = Bits.RotateRight64(v2, 29) + v0;
+                        v3 = Bits.RotateRight64(v3, 29) + v1;
+
+                        ptr += 4 * sizeof(ulong);
+                    }
+                    while (ptr <= (end - 32));
+
+                    v2 ^= Bits.RotateRight64(((v0 + v3) * Metro128Constants.K0) + v1, 21) * Metro128Constants.K1;
+                    v3 ^= Bits.RotateRight64(((v1 + v2) * Metro128Constants.K1) + v0, 21) * Metro128Constants.K0;
+                    v0 ^= Bits.RotateRight64(((v0 + v2) * Metro128Constants.K0) + v3, 21) * Metro128Constants.K1;
+                    v1 ^= Bits.RotateRight64(((v1 + v3) * Metro128Constants.K1) + v2, 21) * Metro128Constants.K0;
+                }
+
+                if ((end - ptr) >= 16)
+                {
+                    v0 += ((ulong*)ptr)[0] * Metro128Constants.K2;
+                    v1 += ((ulong*)ptr)[1] * Metro128Constants.K2;
+
+                    v0 = Bits.RotateRight64(v0, 33) * Metro128Constants.K3;
+                    v1 = Bits.RotateRight64(v1, 33) * Metro128Constants.K3;
+
+                    ptr += 2 * sizeof(ulong);
+
+                    v0 ^= Bits.RotateRight64((v0 * Metro128Constants.K2) + v1, 45) * Metro128Constants.K1;
+                    v1 ^= Bits.RotateRight64((v1 * Metro128Constants.K3) + v0, 45) * Metro128Constants.K0;
+                }
+
+                if ((end - ptr) >= 8)
+                {
+                    v0 += *((ulong*)ptr) * Metro128Constants.K2; ptr += sizeof(ulong); v0 = Bits.RotateRight64(v0, 33) * Metro128Constants.K3;
+                    v0 ^= Bits.RotateRight64((v0 * Metro128Constants.K2) + v1, 27) * Metro128Constants.K1;
+                }
+
+                if ((end - ptr) >= 4)
+                {
+                    v1 += *((uint*)ptr) * Metro128Constants.K2; ptr += sizeof(uint); v1 = Bits.RotateRight64(v1, 33) * Metro128Constants.K3;
+                    v1 ^= Bits.RotateRight64((v1 * Metro128Constants.K3) + v0, 46) * Metro128Constants.K0;
+                }
+
+                if ((end - ptr) >= 2)
+                {
+                    v0 += *((ushort*)ptr) * Metro128Constants.K2; ptr += sizeof(ushort); v0 = Bits.RotateRight64(v0, 33) * Metro128Constants.K3;
+                    v0 ^= Bits.RotateRight64((v0 * Metro128Constants.K2) + v1, 22) * Metro128Constants.K1;
+                }
+
+                if ((end - ptr) >= 1)
+                {
+                    v1 += *((byte*)ptr) * Metro128Constants.K2; v1 = Bits.RotateRight64(v1, 33) * Metro128Constants.K3;
+                    v1 ^= Bits.RotateRight64((v1 * Metro128Constants.K3) + v0, 58) * Metro128Constants.K0;
+                }
+
+                v0 += Bits.RotateRight64((v0 * Metro128Constants.K0) + v1, 13);
+                v1 += Bits.RotateRight64((v1 * Metro128Constants.K1) + v0, 37);
+                v0 += Bits.RotateRight64((v0 * Metro128Constants.K2) + v1, 13);
+                v1 += Bits.RotateRight64((v1 * Metro128Constants.K3) + v0, 37);
+
+                return new Metro128Hash { H1 = v0, H2 = v1 };
+            }
+
+            public static unsafe Metro128Hash Calculate(byte* buffer, int len, ulong seed = 0)
+            {
+                return CalculateInline(buffer, len, seed);
+            }
+
+            public static Metro128Hash Calculate(string value, Encoding encoder, ulong seed = 0)
+            {
+                var buf = encoder.GetBytes(value);
+
+                fixed (byte* buffer = buf)
+                {
+                    return CalculateInline(buffer, buf.Length, seed);
+                }
+            }
+
+            public static Metro128Hash CalculateRaw(string buf, ulong seed = 0)
+            {
+                fixed (char* buffer = buf)
+                {
+                    return CalculateInline((byte*)buffer, buf.Length * sizeof(char), seed);
+                }
+            }
+
+            public static Metro128Hash Calculate(byte[] buf, int len = -1, ulong seed = 0)
+            {
+                if (len == -1)
+                    len = buf.Length;
+
+                fixed (byte* buffer = buf)
+                {
+                    return CalculateInline(buffer, len, seed);
+                }
+            }
+
+            public static Metro128Hash Calculate(int[] buf, int len = -1, ulong seed = 0)
+            {
+                if (len == -1)
+                    len = buf.Length;
+
+                fixed (int* buffer = buf)
+                {
+                    return CalculateInline((byte*)buffer, len * sizeof(int), seed);
+                }
+            }
         }
 
         #endregion
