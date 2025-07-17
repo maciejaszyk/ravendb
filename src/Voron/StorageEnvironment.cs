@@ -1632,12 +1632,12 @@ namespace Voron
             {
                 Seed = (ulong)pageNumber
             };
-            Hashing.Streamed.XXHash64.Begin(ref ctx);
+            Hashing.Streamed.XXHash64.BeginProcess(ref ctx);
 
             Hashing.Streamed.XXHash64.Process(ref ctx, ptr, PageHeader.ChecksumOffset);
             Hashing.Streamed.XXHash64.Process(ref ctx, ptr + PageHeader.ChecksumOffset + sizeof(ulong), dataLength);
 
-            return Hashing.Streamed.XXHash64.End(ref ctx);
+            return Hashing.Streamed.XXHash64.EndProcess(ref ctx);
         }
 
         public void Cleanup(bool tryCleanupRecycledJournals = false)

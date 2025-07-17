@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Attributes;
@@ -99,20 +99,18 @@ namespace Micro.Benchmark.Benchmarks
         [Benchmark]
         public ulong XXHash64_StreamedWhole()
         {
-            var context = new Hashing.Streamed.XXHash64Context { Seed = 1337 };
-            Hashing.Streamed.XXHash64.Begin(ref context);
-            Hashing.Streamed.XXHash64.Process(ref context, _bufferPtr.Ptr, _bufferPtr.Length);
-            return Hashing.Streamed.XXHash64.End(ref context);
+            var processor = new Hashing.Streamed.XXHash64Processor(1337);
+            processor.Process(new ReadOnlySpan<byte>(_bufferPtr.Ptr, _bufferPtr.Length));
+            return processor.End();
         }
 
         [Benchmark]
         public ulong XXHash64_StreamedMultiple()
         {
-            var context = new Hashing.Streamed.XXHash64Context { Seed = 1337 };
-            Hashing.Streamed.XXHash64.Begin(ref context);
-            Hashing.Streamed.XXHash64.Process(ref context, _bufferPtr.Ptr, _bufferPtr.Length - 32);
-            Hashing.Streamed.XXHash64.Process(ref context, _bufferPtr.Ptr + _bufferPtr.Length - 32,32);
-            return Hashing.Streamed.XXHash64.End(ref context);
+            var processor = new Hashing.Streamed.XXHash64Processor(1337);
+            processor.Process(new ReadOnlySpan<byte>(_bufferPtr.Ptr, _bufferPtr.Length - 32));
+            processor.Process(new ReadOnlySpan<byte>(_bufferPtr.Ptr + _bufferPtr.Length - 32,32));
+            return processor.End();
         }
 
         [Benchmark(Baseline = true)]
