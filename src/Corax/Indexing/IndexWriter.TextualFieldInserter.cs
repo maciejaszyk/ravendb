@@ -450,8 +450,8 @@ public unsafe partial class IndexWriter
             }
 
             keys = new Span<CompactTree.CompactKeyLookup>(buffers.Keys, 0, max);
-            postListIds = new Span<long>(buffers.PostListIds, 0, max);
-            pageOffsets = new Span<int>(buffers.PageOffsets, 0, max);
+            postListIds = buffers.PostListIds.ToSpan().Slice(0, max);
+            pageOffsets = buffers.PageOffsets.ToSpan().Slice(0, max);
         }
 
         private (long NonExistingTermListId, long NonExistingTermId) GetOrCreateSpecialPostingList(Tree tree)

@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using Voron;
 using Voron.Data.CompactTrees;
 using Voron.Data.Lookups;
+using Voron.Util;
 
 namespace Corax.Indexing;
 
@@ -15,19 +16,19 @@ public partial class IndexWriter
     /// 
     /// </summary>
     private class FieldBuffers<TKey, TLookupKey> : IDisposable
-    where TKey : unmanaged
-    where TLookupKey : struct, ILookupKey
+        where TKey : unmanaged
+        where TLookupKey : struct, ILookupKey
     {
         private readonly IndexWriter _parent;
         public const int BatchSize = 1024;
 
-        private TKey[] _sortedTerms;
-        private int[] _termIndexes;
+        private ContextBoundNativeList<TKey> _sortedTerms;
+        private ContextBoundNativeList<int> _termIndexes;
 
         public TLookupKey[] Keys;
-        public int[] PageOffsets;
-        public long[] PostListIds;
-        private int[] _entriesOffsets;
+        public ContextBoundNativeList<int> PageOffsets;
+        public ContextBoundNativeList<long> PostListIds;
+        private ContextBoundNativeList<int> _entriesOffsets;
 
         public void PrepareTerms(IndexedField field, out Span<TKey> terms, out Span<int> indexes)
         {
@@ -40,50 +41,51 @@ public partial class IndexWriter
                 termsCount = field.Doubles.Count;
             else
                 throw new InvalidDataException($"Type {typeof(TKey).FullName} is not supported");
-            
-            if (_sortedTerms == null || _sortedTerms.Length < termsCount)
-            {
-                if (_sortedTerms != null)
-                {
-                    ArrayPool<TKey>.Shared.Return(_sortedTerms);
-                    ArrayPool<int>.Shared.Return(_termIndexes);
-                }
 
-                _sortedTerms = ArrayPool<TKey>.Shared.Rent(termsCount);
-                _termIndexes = ArrayPool<int>.Shared.Rent(termsCount);
+            if (_sortedTerms.Capacity < termsCount)
+            {
+                _sortedTerms.EnsureCapacityFor(termsCount);
+                _sortedTerms.Count = _sortedTerms.Capacity;
+
+                _termIndexes.EnsureCapacityFor(termsCount);
+                _termIndexes.Count = _termIndexes.Capacity;
             }
 
             int idx = 0;
+            var sortedTermsSpan = _sortedTerms.ToSpan();
+            var termIndexesSpan = _termIndexes.ToSpan();
             if (typeof(TKey) == typeof(Slice))
             {
                 foreach (var (k, v) in field.Textual)
                 {
-                    _sortedTerms[idx] = (TKey)(object)k;
-                    _termIndexes[idx] = v;
-                    idx++;
-                }
-            }
-            if (typeof(TKey) == typeof(long))
-            {
-                foreach (var (k, v) in field.Longs)
-                {
-                    _sortedTerms[idx] = (TKey)(object)k;
-                    _termIndexes[idx] = v;
-                    idx++;
-                }
-            }
-            if (typeof(TKey) == typeof(double))
-            {
-                foreach (var (k, v) in field.Doubles)
-                {
-                    _sortedTerms[idx] = (TKey)(object)k;
-                    _termIndexes[idx] = v;
+                    sortedTermsSpan[idx] = (TKey)(object)k;
+                    termIndexesSpan[idx] = v;
                     idx++;
                 }
             }
 
-            terms = new Span<TKey>(_sortedTerms, 0, termsCount);
-            indexes = new Span<int>(_termIndexes, 0, termsCount);
+            if (typeof(TKey) == typeof(long))
+            {
+                foreach (var (k, v) in field.Longs)
+                {
+                    sortedTermsSpan[idx] = (TKey)(object)k;
+                    termIndexesSpan[idx] = v;
+                    idx++;
+                }
+            }
+
+            if (typeof(TKey) == typeof(double))
+            {
+                foreach (var (k, v) in field.Doubles)
+                {
+                    sortedTermsSpan[idx] = (TKey)(object)k;
+                    termIndexesSpan[idx] = v;
+                    idx++;
+                }
+            }
+
+            terms = _sortedTerms.ToSpan().Slice(0, termsCount);
+            indexes = _termIndexes.ToSpan().Slice(0, termsCount);
 
             if (typeof(TKey) == typeof(Slice))
                 (MemoryMarshal.Cast<TKey, Slice>(terms)).Sort(indexes, SliceComparer.Instance);
@@ -99,19 +101,26 @@ public partial class IndexWriter
         {
             _parent = parent;
             Keys = ArrayPool<TLookupKey>.Shared.Rent(BatchSize);
-            PageOffsets = ArrayPool<int>.Shared.Rent(BatchSize);
-            PostListIds = ArrayPool<long>.Shared.Rent(BatchSize);
-            _entriesOffsets = ArrayPool<int>.Shared.Rent(BatchSize);
+            PageOffsets = new(parent._transaction.Allocator, BatchSize);
+            PageOffsets.Count = BatchSize;
+
+            PostListIds = new(parent._transaction.Allocator, BatchSize);
+            PostListIds.Count = BatchSize;
+
+            _entriesOffsets = new(parent._transaction.Allocator, BatchSize);
+            _entriesOffsets.Count = BatchSize;
+
+            _sortedTerms = new(parent._transaction.Allocator);
+            _termIndexes = new(_parent._transaction.Allocator);
         }
 
         public void Dispose()
         {
-            if (PostListIds != null) ArrayPool<long>.Shared.Return(PostListIds);
-            if (PageOffsets != null) ArrayPool<int>.Shared.Return(PageOffsets);
-            if (_entriesOffsets != null) ArrayPool<int>.Shared.Return(_entriesOffsets);
-
-            if (_sortedTerms != null) ArrayPool<TKey>.Shared.Return(_sortedTerms);
-            if (_termIndexes != null) ArrayPool<int>.Shared.Return(_termIndexes);
+            PostListIds.Dispose();
+            PageOffsets.Dispose();
+            _entriesOffsets.Dispose();
+            _sortedTerms.Dispose();
+            _termIndexes.Dispose();
 
             if (Keys != null && typeof(TLookupKey) == typeof(CompactTree.CompactKeyLookup))
             {
@@ -130,9 +139,14 @@ public partial class IndexWriter
             if (Keys != null)
                 ArrayPool<TLookupKey>.Shared.Return(Keys);
 
-            PostListIds = null;
-            PageOffsets = null;
-            _entriesOffsets = null;
+            if (Keys != null)
+                ArrayPool<TLookupKey>.Shared.Return(Keys);
+
+            PostListIds = default;
+            PageOffsets = default;
+            _entriesOffsets = default;
+            _sortedTerms = default;
+            _termIndexes = default;
             Keys = null;
         }
     }

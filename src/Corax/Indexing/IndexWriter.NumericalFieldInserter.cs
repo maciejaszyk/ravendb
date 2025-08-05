@@ -179,8 +179,8 @@ public partial class IndexWriter
             }
 
             keys = _buffers.Keys.AsSpan(start: 0, length: max);
-            postingListIds = _buffers.PostListIds.AsSpan(start: 0, length: max);
-            pageOffsets = _buffers.PageOffsets.AsSpan(start: 0, length: max);
+            postingListIds = _buffers.PostListIds.ToSpan().Slice(start: 0, length: max);
+            pageOffsets = _buffers.PageOffsets.ToSpan().Slice(start: 0, length: max);
         }
 
         private FieldBuffers<TKey, TLookupKey> GetBuffers()
