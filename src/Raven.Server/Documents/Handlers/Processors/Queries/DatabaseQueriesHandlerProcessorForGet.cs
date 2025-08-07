@@ -15,7 +15,7 @@ using Sparrow.Json;
 
 namespace Raven.Server.Documents.Handlers.Processors.Queries;
 
-internal sealed class DatabaseQueriesHandlerProcessorForGet : AbstractQueriesHandlerProcessorForGet<QueriesHandler, DocumentsOperationContext, QueryOperationContext, Document>
+internal sealed class DatabaseQueriesHandlerProcessorForGet : AbstractQueriesHandlerProcessorForGet<QueriesHandler, DocumentsOperationContext, QueryOperationContext, Document, DocumentQueryResult>
 {
     public DatabaseQueriesHandlerProcessorForGet([NotNull] QueriesHandler requestHandler, HttpMethod method) : base(requestHandler, requestHandler.Database.QueryMetadataCache, method)
     {
@@ -34,22 +34,22 @@ internal sealed class DatabaseQueriesHandlerProcessorForGet : AbstractQueriesHan
 
     protected override RavenConfiguration Configuration => RequestHandler.Database.Configuration;
 
-    protected override async ValueTask<FacetedQueryResult> GetFacetedQueryResultAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
+    protected override Task<FacetedQueryResult> GetFacetedQueryResultAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
         long? existingResultEtag, OperationCancelToken token)
     {
-        return await RequestHandler.Database.QueryRunner.ExecuteFacetedQuery(query, existingResultEtag, queryContext, token);
+        return RequestHandler.Database.QueryRunner.ExecuteFacetedQuery(query, existingResultEtag, queryContext, token);
     }
 
-    protected override async ValueTask<SuggestionQueryResult> GetSuggestionQueryResultAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
+    protected override Task<SuggestionQueryResult> GetSuggestionQueryResultAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
         long? existingResultEtag, OperationCancelToken token)
     {
-        return await RequestHandler.Database.QueryRunner.ExecuteSuggestionQuery(query, queryContext, existingResultEtag, token);
+        return RequestHandler.Database.QueryRunner.ExecuteSuggestionQuery(query, queryContext, existingResultEtag, token);
     }
 
-    protected override async ValueTask<QueryResultServerSide<Document>> GetQueryResultsAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
+    protected override Task<DocumentQueryResult> GetQueryResultsAsync(IndexQueryServerSide query, QueryOperationContext queryContext,
         long? existingResultEtag, bool metadataOnly, OperationCancelToken token)
     {
-        return await RequestHandler.Database.QueryRunner.ExecuteQuery(query, queryContext, existingResultEtag, token);
+        return RequestHandler.Database.QueryRunner.ExecuteQuery(query, queryContext, existingResultEtag, token);
     }
 
     protected override void EnsureQueryContextInitialized(QueryOperationContext queryContext, IndexQueryServerSide indexQuery)
@@ -62,7 +62,7 @@ internal sealed class DatabaseQueriesHandlerProcessorForGet : AbstractQueriesHan
         return await RequestHandler.Database.QueryRunner.ExecuteIndexEntriesQuery(query, queryContext, ignoreLimit, existingResultEtag, token);
     }
 
-    protected override async ValueTask ExplainAsync(QueryOperationContext queryContext, IndexQueryServerSide query, OperationCancelToken token)
+    protected override async Task ExplainAsync(QueryOperationContext queryContext, IndexQueryServerSide query, OperationCancelToken token)
     {
         var explanations = RequestHandler.Database.QueryRunner.ExplainDynamicIndexSelection(query, out string indexName);
 

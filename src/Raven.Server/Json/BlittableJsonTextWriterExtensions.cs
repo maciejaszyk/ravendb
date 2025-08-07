@@ -417,7 +417,7 @@ namespace Raven.Server.Json
             writer.WriteEndObject();
         }
 
-        public static async Task<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteSuggestionQueryResultAsync(this AsyncBlittableJsonTextWriter writer, JsonOperationContext context, SuggestionQueryResult result, CancellationToken token)
+        public static async ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteSuggestionQueryResultAsync(this AsyncBlittableJsonTextWriter writer, JsonOperationContext context, SuggestionQueryResult result, CancellationToken token)
         {
             writer.WriteStartObject();
 
@@ -450,14 +450,18 @@ namespace Raven.Server.Json
                 writer.WriteComma();
             }
 
-            var numberOfResults = await writer.WriteQueryResultAsync(context, result, metadataOnly: false, partial: true, token);
+            var writeQueryResultTask = writer.WriteQueryResultAsync(context, result, metadataOnly: false, partial: true, token);
 
+            var numberOfResults = writeQueryResultTask.IsCompletedSuccessfully 
+                ? writeQueryResultTask.Result 
+                : await writeQueryResultTask;
+            
             writer.WriteEndObject();
 
             return numberOfResults;
         }
 
-        public static async Task<long> WriteFacetedQueryResultAsync(this AsyncBlittableJsonTextWriter writer, JsonOperationContext context, FacetedQueryResult result, CancellationToken token)
+        public static async ValueTask<long> WriteFacetedQueryResultAsync(this AsyncBlittableJsonTextWriter writer, JsonOperationContext context, FacetedQueryResult result, CancellationToken token)
         {
             writer.WriteStartObject();
 
@@ -476,7 +480,11 @@ namespace Raven.Server.Json
             writer.WriteInteger(result.DurationInMs);
             writer.WriteComma();
 
-            var (numberOfResults, _) = await writer.WriteQueryResultAsync(context, result, metadataOnly: false, partial: true, token);
+            var writeQueryResultTask = writer.WriteQueryResultAsync(context, result, metadataOnly: false, partial: true, token);
+
+            var (numberOfResults, _) = writeQueryResultTask.IsCompletedSuccessfully 
+                ? writeQueryResultTask.Result 
+                : await writeQueryResultTask;
 
             writer.WriteEndObject();
 

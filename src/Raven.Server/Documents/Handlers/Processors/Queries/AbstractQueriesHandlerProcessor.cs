@@ -44,10 +44,20 @@ internal abstract class AbstractQueriesHandlerProcessor<TRequestHandler, TOperat
     public async ValueTask<IndexQueryServerSide> GetIndexQueryAsync(JsonOperationContext context, HttpMethod method, RequestTimeTracker tracker, bool addSpatialProperties = false)
     {
         if (method == HttpMethod.Get)
-            return await ReadIndexQueryAsync(context, tracker, addSpatialProperties);
+        {
+            var readIndexQueryTask = ReadIndexQueryAsync(context, tracker, addSpatialProperties);
+            if (readIndexQueryTask.IsCompletedSuccessfully)
+                return readIndexQueryTask.Result;
+            
+            return await readIndexQueryTask;
+        }
 
-        var json = await context.ReadForMemoryAsync(_stream, "index/query");
-
+        BlittableJsonReaderObject json;
+        var readJson = context.ReadForMemoryAsync(_stream, "index/query");
+        json = readJson.IsCompletedSuccessfully 
+            ? readJson.Result 
+            : await readJson;
+        
         if (json == null)
             throw new BadRequestException("Missing JSON content.");
 
@@ -66,8 +76,8 @@ internal abstract class AbstractQueriesHandlerProcessor<TRequestHandler, TOperat
         return IndexQueryServerSide.Create(_httpContext, json, QueryMetadataCache, tracker, addSpatialProperties, queryType: queryType);
     }
 
-    private async ValueTask<IndexQueryServerSide> ReadIndexQueryAsync(JsonOperationContext context, RequestTimeTracker tracker, bool addSpatialProperties)
+    private ValueTask<IndexQueryServerSide> ReadIndexQueryAsync(JsonOperationContext context, RequestTimeTracker tracker, bool addSpatialProperties)
     {
-        return await IndexQueryServerSide.CreateAsync(_httpContext, _start, _pageSize, context, tracker, addSpatialProperties);
+        return IndexQueryServerSide.CreateAsync(_httpContext, _start, _pageSize, context, tracker, addSpatialProperties);
     }
 }

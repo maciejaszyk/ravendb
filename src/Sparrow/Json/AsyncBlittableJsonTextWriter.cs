@@ -26,15 +26,23 @@ namespace Sparrow.Json
 
         public async ValueTask WriteStreamAsync(Stream stream, CancellationToken token = default)
         {
-            await FlushAsync(token).ConfigureAwait(false);
+            var flushTask = FlushAsync(token);
+            if (flushTask.IsCompletedSuccessfully == false)
+                await flushTask.ConfigureAwait(false);
 
             while (true)
             {
-                _pos = await stream.ReadAsync(_pinnedBuffer.Memory.Memory, token).ConfigureAwait(false);
+                var readTask = stream.ReadAsync(_pinnedBuffer.Memory.Memory, token);
+                _pos = readTask.IsCompletedSuccessfully 
+                    ? readTask.Result
+                    : await readTask.ConfigureAwait(false);
+                
                 if (_pos == 0)
                     break;
 
-                await FlushAsync(token).ConfigureAwait(false);
+                flushTask = FlushAsync(token);
+                if (flushTask.IsCompletedSuccessfully == false)
+                    await flushTask.ConfigureAwait(false);
             }
         }
 

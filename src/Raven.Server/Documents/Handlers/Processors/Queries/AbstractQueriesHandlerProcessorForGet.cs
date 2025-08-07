@@ -25,10 +25,11 @@ using Sparrow.Json;
 
 namespace Raven.Server.Documents.Handlers.Processors.Queries;
 
-internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, TOperationContext, TQueryContext, TQueryResult> : AbstractQueriesHandlerProcessor<TRequestHandler, TOperationContext>
+internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, TOperationContext, TQueryContext, TQueryResult, TQueryResultsContainer> : AbstractQueriesHandlerProcessor<TRequestHandler, TOperationContext>
     where TOperationContext : JsonOperationContext
     where TRequestHandler : AbstractDatabaseRequestHandler<TOperationContext>
     where TQueryContext : IDisposable
+    where TQueryResultsContainer : QueryResultServerSide<TQueryResult>, IDisposable
 {
     protected AbstractQueriesHandlerProcessorForGet([NotNull] TRequestHandler requestHandler, QueryMetadataCache queryMetadataCache, HttpMethod method) : base(requestHandler, queryMetadataCache)
     {
@@ -82,20 +83,21 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
         }
     }
 
-    protected abstract ValueTask ExplainAsync(TQueryContext queryContext, IndexQueryServerSide query, OperationCancelToken token);
+    protected abstract Task ExplainAsync(TQueryContext queryContext, IndexQueryServerSide query, OperationCancelToken token);
 
-    protected abstract ValueTask<FacetedQueryResult> GetFacetedQueryResultAsync(IndexQueryServerSide query, TQueryContext queryContext, long? existingResultEtag, OperationCancelToken token);
+    protected abstract Task<FacetedQueryResult> GetFacetedQueryResultAsync(IndexQueryServerSide query, TQueryContext queryContext, long? existingResultEtag, OperationCancelToken token);
 
-    protected abstract ValueTask<SuggestionQueryResult> GetSuggestionQueryResultAsync(IndexQueryServerSide query, TQueryContext queryContext, long? existingResultEtag, OperationCancelToken token);
+    protected abstract Task<SuggestionQueryResult> GetSuggestionQueryResultAsync(IndexQueryServerSide query, TQueryContext queryContext, long? existingResultEtag, OperationCancelToken token);
 
-    protected abstract ValueTask<QueryResultServerSide<TQueryResult>> GetQueryResultsAsync(IndexQueryServerSide query, TQueryContext queryContext, long? existingResultEtag,
+    protected abstract Task<TQueryResultsContainer> GetQueryResultsAsync(IndexQueryServerSide query, TQueryContext queryContext, long? existingResultEtag,
         bool metadataOnly,
         OperationCancelToken token);
 
     protected override HttpMethod QueryMethod { get; }
 
-    public override async ValueTask ExecuteAsync()
+    public async Task ExecuteAsTaskAsync()
     {
+        using (this)
         using (AllocateContextForQueryOperation(out var queryContext, out var context))
         using (var tracker = CreateRequestTimeTracker())
         {
@@ -104,8 +106,9 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
                 using (var token = RequestHandler.CreateHttpRequestBoundTimeLimitedOperationTokenForQuery())
                 {
                     var parameters = QueryStringParameters.Create(HttpContext.Request);
-                    var indexQuery = await GetIndexQueryAsync(context, QueryMethod, tracker, parameters.AddSpatialProperties).AsTask();
-
+                    var getIndexQueryTask = GetIndexQueryAsync(context, QueryMethod, tracker, parameters.AddSpatialProperties);
+                    var indexQuery = getIndexQueryTask.IsCompletedSuccessfully ? getIndexQueryTask.Result : await getIndexQueryTask;
+                    
                     indexQuery.Diagnostics = parameters.Diagnostics ? new List<string>() : null;
                     indexQuery.AddTimeSeriesNames = parameters.AddTimeSeriesNames;
                     indexQuery.DisableAutoIndexCreation = parameters.DisableAutoIndexCreation;
@@ -140,10 +143,10 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
                         return;
                     }
 
-                    QueryResultServerSide<TQueryResult> result = null;
+                    TQueryResultsContainer result = null;
                     try
                     {
-                        result = await GetQueryResultsAsync(indexQuery, queryContext, existingResultEtag, parameters.MetadataOnly, token).AsTask();
+                        result = await GetQueryResultsAsync(indexQuery, queryContext, existingResultEtag, parameters.MetadataOnly, token);
                     }
                     catch (IndexDoesNotExistException)
                     {
@@ -173,9 +176,16 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
                         {
                             result.Timings = indexQuery.Timings?.ToTimings();
 
-                            (numberOfResults, totalDocumentsSizeInBytes) = await writer.WriteDocumentQueryResultAsync(context, result, parameters.MetadataOnly,
+                            var writeDocumentQueryTask = writer.WriteDocumentQueryResultAsync(context, result, parameters.MetadataOnly,
                                 WriteAdditionalData(indexQuery, parameters.IncludeServerSideQuery), token.Token);
-                            await writer.MaybeFlushAsync(token.Token);
+                            
+                            (numberOfResults, totalDocumentsSizeInBytes) = writeDocumentQueryTask.IsCompletedSuccessfully 
+                                ? writeDocumentQueryTask.Result 
+                                : await writeDocumentQueryTask;
+                            
+                            var flushTask = writer.MaybeFlushAsync(token.Token);
+                            if (flushTask.IsCompletedSuccessfully == false)
+                                await flushTask;
                         }
 
 
@@ -216,6 +226,8 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
             }
         }
     }
+    
+    public override ValueTask ExecuteAsync() => throw new NotSupportedException();
 
     protected virtual void AssertIndexQuery(IndexQueryServerSide indexQuery)
     {
@@ -275,14 +287,17 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
         long totalDocumentsSizeInBytes;
         await using (var writer = new AsyncBlittableJsonTextWriter(operationContext, RequestHandler.ResponseBodyStream(), token.Token))
         {
-            (numberOfResults, totalDocumentsSizeInBytes) = await writer.WriteSuggestionQueryResultAsync(operationContext, result, token.Token);
+            var writeSuggestionQueryResult = writer.WriteSuggestionQueryResultAsync(operationContext, result, token.Token);
+            (numberOfResults, totalDocumentsSizeInBytes) = writeSuggestionQueryResult.IsCompletedSuccessfully 
+                ? writeSuggestionQueryResult.Result 
+                : await writeSuggestionQueryResult;
         }
 
         if (RequestHandler.ShouldAddPagingPerformanceHint(numberOfResults))
             RequestHandler.AddPagingPerformanceHint(PagingOperationType.Queries, $"SuggestQuery ({result.IndexName})", query.Query, numberOfResults, query.PageSize, result.DurationInMs, totalDocumentsSizeInBytes);
     }
 
-    private async ValueTask HandleFacetedQueryAsync(IndexQueryServerSide query, TQueryContext queryContext, TOperationContext operationContext, long? existingResultEtag, OperationCancelToken token)
+    private async Task HandleFacetedQueryAsync(IndexQueryServerSide query, TQueryContext queryContext, TOperationContext operationContext, long? existingResultEtag, OperationCancelToken token)
     {
         var result = await GetFacetedQueryResultAsync(query, queryContext, existingResultEtag, token);
 
@@ -298,7 +313,10 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
         await using (var writer = new AsyncBlittableJsonTextWriter(operationContext, RequestHandler.ResponseBodyStream(), token.Token))
         {
             result.Timings = query.Timings?.ToTimings();
-            numberOfResults = await writer.WriteFacetedQueryResultAsync(operationContext, result, token.Token);
+            var writeFacetedQueryResultTask = writer.WriteFacetedQueryResultAsync(operationContext, result, token.Token);
+            numberOfResults = writeFacetedQueryResultTask.IsCompletedSuccessfully 
+                ? writeFacetedQueryResultTask.Result 
+                : await writeFacetedQueryResultTask;
         }
 
         QueryMetadataCache.MaybeAddToCache(query.Metadata, result.IndexName);
