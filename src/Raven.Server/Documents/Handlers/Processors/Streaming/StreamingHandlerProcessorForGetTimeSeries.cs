@@ -21,6 +21,7 @@ namespace Raven.Server.Documents.Handlers.Processors.Streaming
 
         protected override async ValueTask GetAndWriteTimeSeriesAsync(DocumentsOperationContext context, string docId, string name, DateTime @from, DateTime to, TimeSpan? offset, CancellationToken token)
         {
+            ValueTask<int> flushTask;
             await using (var writer = new AsyncBlittableJsonTextWriter(context, RequestHandler.ResponseBodyStream()))
             {
                 var reader = new TimeSeriesReader(context, docId, name, from, to, offset, token);
@@ -33,13 +34,17 @@ namespace Raven.Server.Documents.Handlers.Processors.Streaming
                 {
                     context.Write(writer, entry.ToTimeSeriesEntryJson());
                     writer.WriteComma();
-                    await writer.MaybeFlushAsync(token);
+                    flushTask = writer.MaybeFlushAsync(token);
+                    if (flushTask.IsCompletedSuccessfully == false)
+                        await flushTask;
                 }
 
                 writer.WriteEndArray();
                 writer.WriteEndObject();
 
-                await writer.MaybeFlushAsync(token);
+                flushTask = writer.MaybeFlushAsync(token);
+                if (flushTask.IsCompletedSuccessfully == false)
+                    await flushTask;
             }
         }
     }

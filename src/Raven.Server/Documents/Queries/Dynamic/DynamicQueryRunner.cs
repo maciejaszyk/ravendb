@@ -32,7 +32,11 @@ namespace Raven.Server.Documents.Queries.Dynamic
         public override async Task ExecuteStreamQuery(IndexQueryServerSide query, QueryOperationContext queryContext, HttpResponse response, IStreamQueryResultWriter<Document> writer,
             OperationCancelToken token)
         {
-            var result = await MatchIndex(query, true, customStalenessWaitTimeout: TimeSpan.FromSeconds(60), token.Token);
+            var matchIndexTask = MatchIndex(query, true, customStalenessWaitTimeout: TimeSpan.FromSeconds(60), token.Token);
+            var result = matchIndexTask.IsCompletedSuccessfully 
+                ? matchIndexTask.Result 
+                : await matchIndexTask;
+            
             var index = result.Instance;
 
             queryContext.WithIndex(index);
@@ -47,7 +51,13 @@ namespace Raven.Server.Documents.Queries.Dynamic
         {
             (long? Index, Index Instance) result;
             using (query.Timings?.For(nameof(QueryTimingsScope.Names.Optimizer)))
-                result = await MatchIndex(query, true, null, token.Token);
+            {
+                // In most cases we're using an already existing index, so most of the time MatchIndex works synchronously.
+                var matchIndexTask = MatchIndex(query, true, null, token.Token);
+                result = matchIndexTask.IsCompletedSuccessfully 
+                    ? matchIndexTask.Result 
+                    : await matchIndexTask;
+            }
 
             var index = result.Instance;
             queryContext.WithIndex(index);

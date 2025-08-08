@@ -543,17 +543,20 @@ namespace Sparrow.Json
             return AllocateStringValue(null, ptr + offset, size);
         }
 
-        public ValueTask<BlittableJsonReaderObject> ReadForDiskAsync(Stream stream, string documentId, CancellationToken? token = null)
+        public ValueTask<BlittableJsonReaderObject> ReadForDiskAsync<TStream>(TStream stream, string documentId, CancellationToken? token = null)
+        where TStream : Stream
         {
             return ParseToMemoryAsync(stream, documentId, BlittableJsonDocumentBuilder.UsageMode.ToDisk, modifier: null, token: token);
         }
 
-        public ValueTask<BlittableJsonReaderObject> ReadForMemoryAsync(Stream stream, string documentId, CancellationToken? token = null)
+        public ValueTask<BlittableJsonReaderObject> ReadForMemoryAsync<TStream>(TStream stream, string documentId, CancellationToken? token = null)
+        where TStream : Stream
         {
             return ParseToMemoryAsync(stream, documentId, BlittableJsonDocumentBuilder.UsageMode.None, modifier: null, token: token);
         }
 
-        private async ValueTask<BlittableJsonReaderObject> ParseToMemoryAsync(Stream stream, string debugTag, BlittableJsonDocumentBuilder.UsageMode mode, IBlittableDocumentModifier modifier = null, CancellationToken? token = null)
+        private async ValueTask<BlittableJsonReaderObject> ParseToMemoryAsync<TStream>(TStream stream, string debugTag, BlittableJsonDocumentBuilder.UsageMode mode, IBlittableDocumentModifier modifier = null, CancellationToken? token = null)
+        where TStream : Stream
         {
             using (GetMemoryBuffer(out var bytes))
                 return await ParseToMemoryAsync(stream, debugTag, mode, bytes, modifier, token).ConfigureAwait(false);
@@ -767,14 +770,15 @@ namespace Sparrow.Json
                 ThrowObjectDisposed();
         }
 
-        public async ValueTask<BlittableJsonReaderObject> ParseToMemoryAsync(
-            Stream stream,
+        public async ValueTask<BlittableJsonReaderObject> ParseToMemoryAsync<TStream>(
+            TStream stream,
             string documentId,
             BlittableJsonDocumentBuilder.UsageMode mode,
             MemoryBuffer bytes,
             IBlittableDocumentModifier modifier = null,
             CancellationToken? token = null,
             int maxSize = int.MaxValue)
+        where TStream : Stream
         {
             EnsureNotDisposed();
 

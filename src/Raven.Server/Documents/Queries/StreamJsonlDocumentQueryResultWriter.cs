@@ -45,7 +45,9 @@ namespace Raven.Server.Documents.Queries
             _writer.WriteEndObject();
 
             _writer.WriteNewLine();
-            await _writer.MaybeFlushAsync(token);
+            var flushTask = _writer.MaybeFlushAsync(token);
+            if (flushTask.IsCompletedSuccessfully == false)
+                await flushTask;
         }
 
         public void EndResponse()

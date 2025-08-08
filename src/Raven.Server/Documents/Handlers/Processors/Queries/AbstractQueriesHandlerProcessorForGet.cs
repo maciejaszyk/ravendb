@@ -56,7 +56,10 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
 
         if (string.Equals(debug, "serverSideQuery", StringComparison.OrdinalIgnoreCase))
         {
-            await ServerSideQueryAsync(context, query);
+            var serverSideQueryTask = ServerSideQueryAsync(context, query);
+            if (serverSideQueryTask.IsCompletedSuccessfully == false)
+                await serverSideQueryTask;
+
             return;
         }
 

@@ -72,7 +72,11 @@ namespace Raven.Server.Documents.Handlers.Processors.Streaming
                     writer.StartResults();
 
                     foreach (var document in documentsEnumerator)
-                        await writer.AddResultAsync(document, token.Token);
+                    {
+                        var addResultTask =  writer.AddResultAsync(document, token.Token);
+                        if (addResultTask.IsCompletedSuccessfully == false)
+                            await addResultTask;
+                    }
 
                     writer.EndResults();
                     writer.EndResponse();

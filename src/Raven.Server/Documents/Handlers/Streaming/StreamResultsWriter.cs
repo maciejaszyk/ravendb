@@ -52,7 +52,9 @@ public sealed class StreamResultsWriter : IStreamResultsWriter<Document>
         }
         
         _writer.WriteDocument(_context, res, metadataOnly: false);
-        await _writer.MaybeFlushAsync(token);
+        var flushTask = _writer.MaybeFlushAsync(token);
+        if (flushTask.IsCompletedSuccessfully == false)
+            await flushTask;
     }
 
     public void EndResponse()

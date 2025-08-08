@@ -111,7 +111,7 @@ namespace Raven.Server.Documents.Queries.Dynamic
             throw new NotSupportedException("Collection query is handled directly by documents storage so suggestions aren't supported");
         }
 
-        private async ValueTask ExecuteCollectionQueryAsync(QueryResultServerSide<Document> resultToFill, IndexQueryServerSide query, string collection, QueryOperationContext context, bool pulseReadingTransaction, CancellationToken token)
+        private async Task ExecuteCollectionQueryAsync(QueryResultServerSide<Document> resultToFill, IndexQueryServerSide query, string collection, QueryOperationContext context, bool pulseReadingTransaction, CancellationToken token)
         {
             using (var queryScope = query.Timings?.For(nameof(QueryTimingsScope.Names.Query)))
             {
@@ -206,8 +206,10 @@ namespace Raven.Server.Documents.Queries.Dynamic
 
                             token.ThrowIfCancellationRequested();
 
-                            await resultToFill.AddResultAsync(document, token);
-
+                            var addResultTask = resultToFill.AddResultAsync(document, token);
+                            if (addResultTask.IsCompletedSuccessfully == false)
+                                await addResultTask;
+                            
                             using (gatherScope?.Start())
                             {
                                 includeDocumentsCommand.Gather(document);

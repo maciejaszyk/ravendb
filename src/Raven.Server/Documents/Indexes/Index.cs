@@ -3315,7 +3315,7 @@ namespace Raven.Server.Documents.Indexes
             DocumentDatabase.QueryMetadataCache.MaybeAddToCache(query.Metadata, Name);
         }
 
-        public virtual async Task<DocumentIdQueryResult> IdQuery(
+        public Task<DocumentIdQueryResult> IdQuery(
             IndexQueryServerSide query,
             QueryOperationContext queryContext,
             DeterminateProgress progress,
@@ -3323,21 +3323,19 @@ namespace Raven.Server.Documents.Indexes
             OperationCancelToken token)
         {
             var result = new DocumentIdQueryResult(progress, onProgress, Definition.ClusterState.LastIndex, token);
-            await QueryInternal(result, query, queryContext, pulseDocsReadingTransaction: false, token: token);
-            return result;
+            return QueryInternal(result, query, queryContext, pulseDocsReadingTransaction: false, token: token);
         }
 
-        public virtual async Task<DocumentQueryResult> Query(
+        public virtual Task<DocumentQueryResult> Query(
             IndexQueryServerSide query,
             QueryOperationContext queryContext,
             OperationCancelToken token)
         {
             var result = new DocumentQueryResult(Definition.ClusterState.LastIndex);
-            await QueryInternal(result, query, queryContext, pulseDocsReadingTransaction: false, token: token);
-            return result;
+            return QueryInternal(result, query, queryContext, pulseDocsReadingTransaction: false, token: token);
         }
 
-        private async Task QueryInternal<TQueryResult>(
+        private async Task<TQueryResult> QueryInternal<TQueryResult>(
             TQueryResult resultToFill,
             IndexQueryServerSide query,
             QueryOperationContext queryContext,
@@ -3515,8 +3513,10 @@ namespace Raven.Server.Documents.Indexes
                                             //Streaming:
                                             UpdateQueryStatistics();
                                             
-                                            await resultToFill.AddResultAsync(document.Result, token.Token);
-
+                                            var addResultTask = resultToFill.AddResultAsync(document.Result, token.Token);
+                                            if (addResultTask.IsCompletedSuccessfully == false)
+                                                await addResultTask;
+                                            
                                             if (document.Highlightings != null)
                                                 resultToFill.AddHighlightings(document.Highlightings);
 
@@ -3592,7 +3592,7 @@ namespace Raven.Server.Documents.Indexes
                             }
                         }
 
-                        return;
+                        return resultToFill;
                     }
                 }
             }

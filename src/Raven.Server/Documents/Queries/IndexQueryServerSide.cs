@@ -259,9 +259,12 @@ namespace Raven.Server.Documents.Queries
                             case "query":
                                 continue;
                             case "parameters":
-                                await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(item.Value[0])))
+                                using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(item.Value[0])))
                                 {
-                                    result.QueryParameters = await context.ReadForMemoryAsync(stream, "query parameters");
+                                    var readQueryParametersTask = context.ReadForMemoryAsync(stream, "query parameters");
+                                    result.QueryParameters = readQueryParametersTask.IsCompletedSuccessfully 
+                                        ? readQueryParametersTask.Result 
+                                        : await readQueryParametersTask; 
                                 }
                                 continue;
                             case "waitForNonStaleResults":

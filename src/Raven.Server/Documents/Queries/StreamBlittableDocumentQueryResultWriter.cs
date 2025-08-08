@@ -25,7 +25,9 @@ namespace Raven.Server.Documents.Queries
             }
 
             Writer.WriteObject(res);
-            await Writer.MaybeFlushAsync(token);
+            var flushTask = Writer.MaybeFlushAsync(token);
+            if (flushTask.IsCompletedSuccessfully == false)
+                await flushTask;
         }
     }
 }
