@@ -165,8 +165,8 @@ internal sealed class DocumentHandlerProcessorForGet : AbstractDocumentHandlerPr
         });
     }
 
-    protected override ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteDocumentsAsync(AsyncBlittableJsonTextWriter writer,
-        DocumentsOperationContext context, IEnumerable<Document> documentsToWrite, bool metadataOnly, CancellationToken token)
+    protected override ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteDocumentsAsync<TDocumentsEnumerable>(AsyncBlittableJsonTextWriter writer, DocumentsOperationContext context, TDocumentsEnumerable documentsToWrite,
+        bool metadataOnly, CancellationToken token)
     {
         return writer.WriteDocumentsAsync(context, documentsToWrite, metadataOnly, token);
     }

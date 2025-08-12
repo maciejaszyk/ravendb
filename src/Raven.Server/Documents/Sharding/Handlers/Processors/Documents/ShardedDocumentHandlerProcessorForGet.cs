@@ -106,11 +106,10 @@ internal sealed class ShardedDocumentHandlerProcessorForGet : AbstractDocumentHa
         return result;
     }
 
-    protected override async ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteDocumentsAsync(AsyncBlittableJsonTextWriter writer,
-        TransactionOperationContext context, IEnumerable<BlittableJsonReaderObject> documentsToWrite,
+    protected override ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteDocumentsAsync<TDocumentsEnumerable>(AsyncBlittableJsonTextWriter writer, TransactionOperationContext context, TDocumentsEnumerable documentsToWrite,
         bool metadataOnly, CancellationToken token)
     {
-        return await writer.WriteObjectsAsync(context, documentsToWrite, token);
+        return writer.WriteObjectsAsync(context, documentsToWrite, token);
     }
 
     protected override async ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteDocumentsAsync(AsyncBlittableJsonTextWriter writer,

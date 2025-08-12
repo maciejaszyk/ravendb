@@ -308,9 +308,10 @@ internal abstract class
         return (numberOfResults, totalDocumentsSizeInBytes);
     }
 
-    protected abstract ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteDocumentsAsync(AsyncBlittableJsonTextWriter writer,
+    protected abstract ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteDocumentsAsync<TDocumentsEnumerable>(AsyncBlittableJsonTextWriter writer,
         TOperationContext context,
-        IEnumerable<TDocumentType> documentsToWrite, bool metadataOnly, CancellationToken token);
+        TDocumentsEnumerable documentsToWrite, bool metadataOnly, CancellationToken token)
+        where TDocumentsEnumerable : IEnumerable<TDocumentType>;
 
     protected abstract ValueTask<(long NumberOfResults, long TotalDocumentsSizeInBytes)> WriteDocumentsAsync(AsyncBlittableJsonTextWriter writer,
         TOperationContext context,
