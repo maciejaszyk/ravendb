@@ -117,6 +117,7 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
         using (_timeTracker)
         using (_token)
         {
+            // trick to ensure all is disposed
         }
 
         base.Dispose();
@@ -125,9 +126,11 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
     public Task Build()
     {
         return GetIndexAndParametersAsync(this)
-            .ContinueWith(RetrieveDocuments, this)
-            .ContinueWith(WriteResults, this)
-            .ContinueWith(DisposableTask, this);
+            .ContinueWith(RetrieveDocuments, this, TaskContinuationOptions.OnlyOnRanToCompletion)
+            .Unwrap()
+            .ContinueWith(WriteResults, this, TaskContinuationOptions.OnlyOnRanToCompletion)
+            .Unwrap()
+            .ContinueWith(DisposableTask, this, TaskContinuationOptions.OnlyOnRanToCompletion);
     }
 
     public Task DisposableTask(Task task, object state)
@@ -140,10 +143,14 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
 
     private static async Task WriteResults(Task task, [CanBeNull] object state)
     {
+        
         var processor = state as AbstractQueriesHandlerProcessorForGet<TRequestHandler, TOperationContext, TQueryContext, TQueryResult, TQueryResultsContainer>;
 
         if (processor!._doNotContinue || task.IsCompletedSuccessfully == false)
+        {
             await task;
+            return;
+        }
 
         try
         {
@@ -198,6 +205,11 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
     private static async Task RetrieveDocuments(Task task, [CanBeNull] object state)
     {
         var processor = state as AbstractQueriesHandlerProcessorForGet<TRequestHandler, TOperationContext, TQueryContext, TQueryResult, TQueryResultsContainer>;
+        if (processor!._doNotContinue || task.IsCompletedSuccessfully == false)
+        {
+            await task;
+            return;
+        }
         Debug.Assert(processor != null);
         try
         {
@@ -205,11 +217,13 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
             try
             {
                 processor!._result = await processor.GetQueryResultsAsync(processor._indexQuery, processor._queryContext, processor._existingResultEtag, processor._parameters.MetadataOnly, processor._token);
+                
             }
             catch (IndexDoesNotExistException)
             {
                 processor!._result?.Dispose();
                 processor.HttpContext.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                processor._doNotContinue = true;
                 return;
             }
             catch (Exception)
@@ -229,7 +243,6 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
     {
         processor._queryContextDisposer = processor.AllocateContextForQueryOperation(out processor._queryContext, out processor._context);
         processor._timeTracker = processor.CreateRequestTimeTracker();
-
         try
         {
             processor._token = processor.RequestHandler.CreateHttpRequestBoundTimeLimitedOperationTokenForQuery();
@@ -262,6 +275,20 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
 
             if (TrafficWatchManager.HasRegisteredClients)
                 processor.RequestHandler.TrafficWatchQuery(processor._indexQuery);
+            
+            if (processor._indexQuery.Metadata.HasFacet)
+            {
+                processor._doNotContinue = true;
+                await processor.HandleFacetedQueryAsync(processor._indexQuery, processor._queryContext, processor._context, processor._existingResultEtag, processor._token);
+                return;
+            }
+            
+            if (processor._indexQuery.Metadata.HasSuggest)
+            {
+                processor._doNotContinue = true;
+                await processor.HandleSuggestQueryAsync(processor._indexQuery, processor._queryContext, processor._context, processor._existingResultEtag, processor._token);
+                return;
+            }
         }
         catch (Exception e)
         {
@@ -291,137 +318,137 @@ internal abstract class AbstractQueriesHandlerProcessorForGet<TRequestHandler, T
         }
     }
 
-    public async Task ExecuteAsTaskAsync()
+    public Task ExecuteAsTaskAsync()
     {
         return Build();
-        using (this)
-        using (AllocateContextForQueryOperation(out var queryContext, out var context))
-        using (var tracker = CreateRequestTimeTracker())
-        {
-            try
-            {
-                using (var token = RequestHandler.CreateHttpRequestBoundTimeLimitedOperationTokenForQuery())
-                {
-                    var parameters = QueryStringParameters.Create(HttpContext.Request);
-                    var getIndexQueryTask = GetIndexQueryAsync(context, QueryMethod, tracker, parameters.AddSpatialProperties);
-                    var indexQuery = getIndexQueryTask.IsCompletedSuccessfully ? getIndexQueryTask.Result : await getIndexQueryTask;
-
-                    indexQuery.Diagnostics = parameters.Diagnostics ? new List<string>() : null;
-                    indexQuery.AddTimeSeriesNames = parameters.AddTimeSeriesNames;
-                    indexQuery.DisableAutoIndexCreation = parameters.DisableAutoIndexCreation;
-
-                    if (RequestHandler.HttpContext.Request.IsFromOrchestrator())
-                        indexQuery.ReturnOptions = IndexQueryServerSide.QueryResultReturnOptions.CreateForSharding(indexQuery);
-
-                    AssertIndexQuery(indexQuery);
-
-                    var existingResultEtag = RequestHandler.GetLongFromHeaders(Constants.Headers.IfNoneMatch);
-
-                    EnsureQueryContextInitialized(queryContext, indexQuery);
-
-                    if (string.IsNullOrWhiteSpace(parameters.Debug) == false)
-                    {
-                        await HandleDebugAsync(indexQuery, queryContext, context, parameters, existingResultEtag, token);
-                        return;
-                    }
-
-                    if (TrafficWatchManager.HasRegisteredClients)
-                        RequestHandler.TrafficWatchQuery(indexQuery);
-
-                    if (indexQuery.Metadata.HasFacet)
-                    {
-                        await HandleFacetedQueryAsync(indexQuery, queryContext, context, existingResultEtag, token);
-                        return;
-                    }
-
-                    if (indexQuery.Metadata.HasSuggest)
-                    {
-                        await HandleSuggestQueryAsync(indexQuery, queryContext, context, existingResultEtag, token);
-                        return;
-                    }
-
-                    TQueryResultsContainer result = null;
-                    try
-                    {
-                        result = await GetQueryResultsAsync(indexQuery, queryContext, existingResultEtag, parameters.MetadataOnly, token);
-                    }
-                    catch (IndexDoesNotExistException)
-                    {
-                        result?.Dispose();
-                        HttpContext.Response.StatusCode = (int)HttpStatusCode.NotFound;
-                        return;
-                    }
-                    catch (Exception)
-                    {
-                        result?.Dispose();
-                        throw;
-                    }
-
-                    using (result)
-                    {
-                        if (result.NotModified)
-                        {
-                            HttpContext.Response.StatusCode = (int)HttpStatusCode.NotModified;
-                            return;
-                        }
-
-                        HttpContext.Response.Headers[Constants.Headers.Etag] = CharExtensions.ToInvariantString(result.ResultEtag);
-
-                        long numberOfResults;
-                        long totalDocumentsSizeInBytes;
-                        await using (var writer = new AsyncBlittableJsonTextWriter(context, RequestHandler.ResponseBodyStream(), token.Token))
-                        {
-                            result.Timings = indexQuery.Timings?.ToTimings();
-
-                            var writeDocumentQueryTask = writer.WriteDocumentQueryResultAsync(context, result, parameters.MetadataOnly,
-                                WriteAdditionalData(indexQuery, parameters.IncludeServerSideQuery), token.Token);
-
-                            (numberOfResults, totalDocumentsSizeInBytes) = writeDocumentQueryTask.IsCompletedSuccessfully
-                                ? writeDocumentQueryTask.Result
-                                : await writeDocumentQueryTask;
-
-                            var flushTask = writer.MaybeFlushAsync(token.Token);
-                            if (flushTask.IsCompletedSuccessfully == false)
-                                await flushTask;
-                        }
-
-
-                        QueryMetadataCache.MaybeAddToCache(indexQuery.Metadata, result.IndexName);
-
-                        if (RequestHandler.ShouldAddPagingPerformanceHint(numberOfResults))
-                        {
-                            RequestHandler.AddPagingPerformanceHint(PagingOperationType.Queries, $"Query ({result.IndexName})",
-                                $"{indexQuery.Metadata.QueryText}\n{indexQuery.QueryParameters}", numberOfResults, indexQuery.PageSize, result.DurationInMs,
-                                totalDocumentsSizeInBytes);
-                        }
-
-                        AddQueryTimingsToTrafficWatch(indexQuery);
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                if (tracker.Query == null)
-                {
-                    string errorMessage;
-                    if (e is EndOfStreamException || e is ArgumentException)
-                    {
-                        errorMessage = $"Failed: {e.Message}";
-                    }
-                    else
-                    {
-                        errorMessage = $"Failed: {HttpContext.Request.Path.Value} {e}";
-                    }
-
-                    tracker.Query = errorMessage;
-
-                    if (TrafficWatchManager.HasRegisteredClients)
-                        RequestHandler.AddStringToHttpContext(errorMessage, TrafficWatchChangeType.Queries);
-                }
-
-                throw;
-            }
-        }
+        // using (this)
+        // using (AllocateContextForQueryOperation(out var queryContext, out var context))
+        // using (var tracker = CreateRequestTimeTracker())
+        // {
+        //     try
+        //     {
+        //         using (var token = RequestHandler.CreateHttpRequestBoundTimeLimitedOperationTokenForQuery())
+        //         {
+        //             var parameters = QueryStringParameters.Create(HttpContext.Request);
+        //             var getIndexQueryTask = GetIndexQueryAsync(context, QueryMethod, tracker, parameters.AddSpatialProperties);
+        //             var indexQuery = getIndexQueryTask.IsCompletedSuccessfully ? getIndexQueryTask.Result : await getIndexQueryTask;
+        //
+        //             indexQuery.Diagnostics = parameters.Diagnostics ? new List<string>() : null;
+        //             indexQuery.AddTimeSeriesNames = parameters.AddTimeSeriesNames;
+        //             indexQuery.DisableAutoIndexCreation = parameters.DisableAutoIndexCreation;
+        //
+        //             if (RequestHandler.HttpContext.Request.IsFromOrchestrator())
+        //                 indexQuery.ReturnOptions = IndexQueryServerSide.QueryResultReturnOptions.CreateForSharding(indexQuery);
+        //
+        //             AssertIndexQuery(indexQuery);
+        //
+        //             var existingResultEtag = RequestHandler.GetLongFromHeaders(Constants.Headers.IfNoneMatch);
+        //
+        //             EnsureQueryContextInitialized(queryContext, indexQuery);
+        //
+        //             if (string.IsNullOrWhiteSpace(parameters.Debug) == false)
+        //             {
+        //                 await HandleDebugAsync(indexQuery, queryContext, context, parameters, existingResultEtag, token);
+        //                 return;
+        //             }
+        //
+        //             if (TrafficWatchManager.HasRegisteredClients)
+        //                 RequestHandler.TrafficWatchQuery(indexQuery);
+        //
+        //             if (indexQuery.Metadata.HasFacet)
+        //             {
+        //                 await HandleFacetedQueryAsync(indexQuery, queryContext, context, existingResultEtag, token);
+        //                 return;
+        //             }
+        //
+        //             if (indexQuery.Metadata.HasSuggest)
+        //             {
+        //                 await HandleSuggestQueryAsync(indexQuery, queryContext, context, existingResultEtag, token);
+        //                 return;
+        //             }
+        //
+        //             TQueryResultsContainer result = null;
+        //             try
+        //             {
+        //                 result = await GetQueryResultsAsync(indexQuery, queryContext, existingResultEtag, parameters.MetadataOnly, token);
+        //             }
+        //             catch (IndexDoesNotExistException)
+        //             {
+        //                 result?.Dispose();
+        //                 HttpContext.Response.StatusCode = (int)HttpStatusCode.NotFound;
+        //                 return;
+        //             }
+        //             catch (Exception)
+        //             {
+        //                 result?.Dispose();
+        //                 throw;
+        //             }
+        //
+        //             using (result)
+        //             {
+        //                 if (result.NotModified)
+        //                 {
+        //                     HttpContext.Response.StatusCode = (int)HttpStatusCode.NotModified;
+        //                     return;
+        //                 }
+        //
+        //                 HttpContext.Response.Headers[Constants.Headers.Etag] = CharExtensions.ToInvariantString(result.ResultEtag);
+        //
+        //                 long numberOfResults;
+        //                 long totalDocumentsSizeInBytes;
+        //                 await using (var writer = new AsyncBlittableJsonTextWriter(context, RequestHandler.ResponseBodyStream(), token.Token))
+        //                 {
+        //                     result.Timings = indexQuery.Timings?.ToTimings();
+        //
+        //                     var writeDocumentQueryTask = writer.WriteDocumentQueryResultAsync(context, result, parameters.MetadataOnly,
+        //                         WriteAdditionalData(indexQuery, parameters.IncludeServerSideQuery), token.Token);
+        //
+        //                     (numberOfResults, totalDocumentsSizeInBytes) = writeDocumentQueryTask.IsCompletedSuccessfully
+        //                         ? writeDocumentQueryTask.Result
+        //                         : await writeDocumentQueryTask;
+        //
+        //                     var flushTask = writer.MaybeFlushAsync(token.Token);
+        //                     if (flushTask.IsCompletedSuccessfully == false)
+        //                         await flushTask;
+        //                 }
+        //
+        //
+        //                 QueryMetadataCache.MaybeAddToCache(indexQuery.Metadata, result.IndexName);
+        //
+        //                 if (RequestHandler.ShouldAddPagingPerformanceHint(numberOfResults))
+        //                 {
+        //                     RequestHandler.AddPagingPerformanceHint(PagingOperationType.Queries, $"Query ({result.IndexName})",
+        //                         $"{indexQuery.Metadata.QueryText}\n{indexQuery.QueryParameters}", numberOfResults, indexQuery.PageSize, result.DurationInMs,
+        //                         totalDocumentsSizeInBytes);
+        //                 }
+        //
+        //                 AddQueryTimingsToTrafficWatch(indexQuery);
+        //             }
+        //         }
+        //     }
+        //     catch (Exception e)
+        //     {
+        //         if (tracker.Query == null)
+        //         {
+        //             string errorMessage;
+        //             if (e is EndOfStreamException || e is ArgumentException)
+        //             {
+        //                 errorMessage = $"Failed: {e.Message}";
+        //             }
+        //             else
+        //             {
+        //                 errorMessage = $"Failed: {HttpContext.Request.Path.Value} {e}";
+        //             }
+        //
+        //             tracker.Query = errorMessage;
+        //
+        //             if (TrafficWatchManager.HasRegisteredClients)
+        //                 RequestHandler.AddStringToHttpContext(errorMessage, TrafficWatchChangeType.Queries);
+        //         }
+        //
+        //         throw;
+        //     }
+        // }
     }
 
     public override ValueTask ExecuteAsync() => throw new NotSupportedException();
