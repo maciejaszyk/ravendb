@@ -16,7 +16,6 @@
     <PackageReference Include="BenchmarkDotNet.Diagnostics.Windows" />
     <PackageReference Include="BenchmarkDotNet" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" />
-    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent"  />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Corax\Corax.csproj" />
