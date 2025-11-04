@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Corax.Utils;
 
@@ -26,12 +25,12 @@ public sealed class GrowableHashSet<TItem>
     }
 
     public bool HasMultipleHashSets => _hashSetsBucket != null;
-    private const int MaxSizePerCollection = 128_000_000;
+
     public GrowableHashSet(IEqualityComparer<TItem> comparer = null, int? maxSizePerCollection = null)
     {
         _comparer = comparer;
         _hashSetsBucket = null;
-        _maxSizePerCollection = Math.Min(maxSizePerCollection ?? MaxSizePerCollection, MaxSizePerCollection);
+        _maxSizePerCollection = maxSizePerCollection ?? (1 << 27); // 134M items
         CreateNewHashSet();
     }
 
