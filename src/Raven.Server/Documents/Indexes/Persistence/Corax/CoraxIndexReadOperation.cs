@@ -398,7 +398,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                
             }
 
-            public long RegisterDuplicates<TProjection>(ref TProjection hasProjection, long currentIdx, Span<long> ids, CancellationToken token)
+            public long RegisterDuplicates<TProjection>(ref TProjection hasProjection, long currentIdx, ReadOnlySpan<long> ids, CancellationToken token)
                 where TProjection : struct, IHasProjection
             {
                 // From now on, we know we will try to skip duplicates.
@@ -421,9 +421,12 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                 if (_isMap && hasProjection.IsProjection == false)
                 {
                     // Assumptions: we're in Map, so that mean we have ID of the doc saved in the tree. So we want to keep track what we returns
-                    _documentIdReader.GetAllTermsFromSet(distinctIds, out var keys);
-                    foreach (var key in keys)
+                    foreach (var id in distinctIds)
+                    {
+                        _documentIdReader.TryGetRawTermFor(id, out var key);
                         _alreadySeenDocumentKeysInPreviousPage.Add(key);
+                    }
+
                     return limit;
                 }
 
@@ -672,7 +675,6 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                         goto Done;
 
                     // If we are going to skip, we've better do it knowing how many we have passed. 
-                    // After this call the order of ids from 0 to `i` may be changed, and we cannot rely on it (a sorting case).
                     long i = identityTracker.RegisterDuplicates(ref hasProjections, totalResults.Value, ids.AsSpan(0, read), token);
                     totalResults.Value += read; // important that this is *after* RegisterDuplicates
 
@@ -1426,7 +1428,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                 _maxSizePerCollection = maxSizePerCollection ?? int.MaxValue;
                 CreateNewHashSet();
             }
-            
+
             public bool Add(TItem item)
             {
                 if (_newestHashSet!.Count >= _maxSizePerCollection)

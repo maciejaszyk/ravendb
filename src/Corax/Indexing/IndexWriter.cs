@@ -140,6 +140,18 @@ namespace Corax.Indexing
         private HashSet<long> _nullTermsMarkers;
         private HashSet<long> _nonExistingTermsMarkers;
         private Dictionary<long, IndexedField> _fieldsByRootPage;
+        
+        /// <summary>
+        /// Context used by analyzers during indexing.
+        /// </summary>
+        private readonly AnalyzersContext _analyzersContext;
+        
+        
+        
+        private FieldBuffers<Slice, CompactTree.CompactKeyLookup> _textualFieldBuffers;
+        private FieldBuffers<long, Int64LookupKey> _longFieldBuffers;
+        private FieldBuffers<double, DoubleLookupKey> _doubleFieldBuffers;
+        private FastPForDecoder _pforDecoder;
 
         /// <summary>
         /// Method to update dynamic mapping in runtime. 
@@ -213,9 +225,12 @@ namespace Corax.Indexing
             _fieldsTree = _transaction.CreateTree(Constants.IndexWriter.FieldsSlice);
 
             _indexMetadata = _transaction.CreateTree(Constants.IndexMetadataSlice);
-            _initialNumberOfEntries = _indexMetadata?.ReadInt64(Constants.IndexWriter.NumberOfEntriesSlice) ?? 0;
-            _lastEntryId = _indexMetadata?.ReadInt64(Constants.IndexWriter.LastEntryIdSlice) ?? 0;
+            Debug.Assert(_indexMetadata is not null);
+            
+            _initialNumberOfEntries = _indexMetadata.ReadInt64(Constants.IndexWriter.NumberOfEntriesSlice) ?? 0;
+           
 
+            _lastEntryId = _indexMetadata?.ReadInt64(Constants.IndexWriter.LastEntryIdSlice) ?? 0;
             _documentBoost = _transaction.FixedTreeFor(Constants.DocumentBoostSlice, sizeof(float));
             _nullEntriesPostingListsTree = _transaction.CreateTree(Constants.IndexWriter.NullPostingLists);
             _nonExistingEntriesPostingListsTree = _transaction.CreateTree(Constants.IndexWriter.NonExistingPostingLists);
@@ -300,13 +315,15 @@ namespace Corax.Indexing
 
             // We do not dispose because we will be storing the slice in the hash set.
             Slice.From(_transaction.Allocator, key, ByteStringType.Immutable, out var keySlice);
-            _indexedEntries.Add(keySlice); // Register entry by key. 
+            var isUnique = _indexedEntries.Add(keySlice); // Register entry by key.
+
+
             int index = InsertTermsPerEntry(entryId);
             _entryBuilder.Init(entryId, index, keySlice);
             return _entryBuilder;
         }
 
-        private DocumentEntryId InitBuilder()
+        private long InitBuilder()
         {
             if (_entryBuilder.Active)
                 ThrowPreviousBuilderIsNotDisposed();

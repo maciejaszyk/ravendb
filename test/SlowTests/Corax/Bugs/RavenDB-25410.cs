@@ -132,7 +132,5 @@ public class RavenDB_25410(ITestOutputHelper output) : StorageTest(output)
         }
 
         public QueryInspectionNode Inspect() => throw new NotImplementedException();
-
-        public DuplicatesOccurrence DuplicatesOccurrenceStatus => DuplicatesOccurrence.Possible;
     }
 }
