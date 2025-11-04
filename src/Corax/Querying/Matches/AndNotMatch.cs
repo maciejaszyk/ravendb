@@ -20,7 +20,6 @@ namespace Corax.Querying.Matches
         private long _totalResults;
         private QueryCountConfidence _confidence;
         private readonly CancellationToken _token;
-        public Duplicates DuplicatesStatus => Duplicates.Possible;
 
         public bool IsBoosting => _inner.IsBoosting || _outer.IsBoosting;
         public long Count => _totalResults;

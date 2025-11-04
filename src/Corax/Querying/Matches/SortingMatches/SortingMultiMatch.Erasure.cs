@@ -19,8 +19,6 @@ namespace Corax.Querying.Matches.SortingMatches
         }
 
         public long TotalResults => _functionTable.TotalResultsFunc(ref this);
-        
-        public Duplicates DuplicatesStatus => Duplicates.NotPossible;
 
         public long Count => throw new NotSupportedException();
 

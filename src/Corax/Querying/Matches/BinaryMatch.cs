@@ -133,6 +133,5 @@ namespace Corax.Querying.Matches
         }
 
         string DebugView => Inspect().ToString();
-        public Duplicates DuplicatesStatus => Duplicates.Possible;
     }
 }

@@ -69,8 +69,6 @@ public interface IQueryMatch
     QueryInspectionNode Inspect();
 
     string DebugView => Inspect().ToString();
-    
-    Duplicates DuplicatesStatus { get; }
 }
 
 public enum SkipSortingResult
@@ -78,10 +76,4 @@ public enum SkipSortingResult
     ResultsNativelySorted,
     WillSkipSorting,
     SortingIsRequired
-}
-
-public enum Duplicates
-{
-    Possible,
-    NotPossible
 }

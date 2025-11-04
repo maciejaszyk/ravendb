@@ -383,6 +383,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
             private bool _isMap;
 
             private GrowableHashSet<UnmanagedSpan> _alreadySeenDocumentKeysInPreviousPage;
+            private GrowableHashSet<long> _alreadySeenDocumentEntriesIdsInPreviousPage;
             private GrowableHashSet<ulong> _alreadySeenProjections;
             public long QueryStart;
             private TermsReader _documentIdReader;
@@ -402,9 +403,12 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                 _isMap = index.Type.IsMap();
                 
                 _canPerformPaginationBasedOnEntriesIds = searcher.EntryIdPaginationSupportStatus == EntryIdPaginationSupportStatus.Supported
+                                                        && typeof(THasProjection) == typeof(NoProjection)
                                                         && query.Metadata.OrderBy is null;
 
-                if (_canPerformPaginationBasedOnEntriesIds == false)
+                if (_canPerformPaginationBasedOnEntriesIds)
+                    _alreadySeenDocumentEntriesIdsInPreviousPage = new();
+                else
                     _alreadySeenDocumentKeysInPreviousPage = new(UnmanagedSpanComparer.Instance);
             }
 
@@ -440,6 +444,11 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                                 _alreadySeenDocumentKeysInPreviousPage.Add(key);
                             distinctIds = distinctIds[read..];
                         }
+                    }
+                    else
+                    {
+                        foreach (var id in distinctIds)
+                            _alreadySeenDocumentEntriesIdsInPreviousPage.Add(id);
                     }
 
                     return limit;
@@ -484,16 +493,16 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                 return limit;
             }
 
-            public bool ShouldIncludeIdentity<TProjection>(ref TProjection hasProjection, UnmanagedSpan identity)
+            public bool ShouldIncludeIdentity<TProjection>(ref TProjection hasProjection, UnmanagedSpan identity, long indexEntryId)
                 where TProjection : struct, IHasProjection
             {
                 if (hasProjection.IsProjection)
                     return true;
 
-                if (_canPerformPaginationBasedOnEntriesIds == false)
-                    return _alreadySeenDocumentKeysInPreviousPage.Add(identity);
-
-                return true;
+                return 
+                    _canPerformPaginationBasedOnEntriesIds 
+                        ? _alreadySeenDocumentEntriesIdsInPreviousPage.Add(indexEntryId)
+                        : _alreadySeenDocumentKeysInPreviousPage.Add(identity);
             }
 
             public bool ShouldIncludeDocument<TProjection>(ref TProjection hasProjection, Document doc)
@@ -715,7 +724,7 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
                         var identityExists = retriever.TryGetKeyCorax(_documentIdReader, indexEntryId, out var rawIdentity);
 
                         // If we have figured out that this document identity has already been seen, we are skipping it.
-                        if (identityExists && identityTracker.ShouldIncludeIdentity(ref hasProjections, rawIdentity) == false)
+                        if (identityExists && identityTracker.ShouldIncludeIdentity(ref hasProjections, rawIdentity, indexEntryId) == false)
                         {
                             docsToLoad++;
                             skippedResults.Value++;
@@ -1294,7 +1303,63 @@ namespace Raven.Server.Documents.Indexes.Persistence.Corax
             exceptionAggregator.Execute(() => IndexSearcher?.Dispose());
             exceptionAggregator.ThrowIfNeeded();
         }
-        
+
+        internal sealed class GrowableHashSet<TItem>
+        {
+            private List<HashSet<TItem>> _hashSetsBucket;
+            private HashSet<TItem> _newestHashSet;
+            private readonly int _maxSizePerCollection;
+            private readonly IEqualityComparer<TItem> _comparer;
+
+            public bool HasMultipleHashSets => _hashSetsBucket != null;
+
+            public GrowableHashSet(IEqualityComparer<TItem> comparer = null, int? maxSizePerCollection = null)
+            {
+                _comparer = comparer;
+                _hashSetsBucket = null;
+                _maxSizePerCollection = maxSizePerCollection ?? int.MaxValue;
+                CreateNewHashSet();
+            }
+            
+            public bool Add(TItem item)
+            {
+                if (_newestHashSet!.Count >= _maxSizePerCollection)
+                    UnlikelyGrowBuffer();
+
+                if (_hashSetsBucket != null && Contains(item))
+                    return false;
+
+                return _newestHashSet.Add(item);
+            }
+
+            private void UnlikelyGrowBuffer()
+            {
+                _hashSetsBucket ??= new();
+                _hashSetsBucket.Add(_newestHashSet);
+                CreateNewHashSet();
+            }
+
+            public bool Contains(TItem item)
+            {
+                if (_hashSetsBucket != null)
+                {
+                    foreach (var hashSet in _hashSetsBucket)
+                        if (hashSet.Contains(item))
+                            return true;
+                }
+
+                return _newestHashSet!.Contains(item);
+            }
+
+            private void CreateNewHashSet()
+            {
+                if (_comparer == null)
+                    _newestHashSet = new();
+                else
+                    _newestHashSet = new(_comparer);
+            }
+        }
+
         [DoesNotReturn]
         private static void ThrowDistinctOnBiggerCollectionThanInt32()
         {
