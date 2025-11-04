@@ -23,7 +23,7 @@ namespace Corax.Querying.Matches
 
         public long Count => _functionTable.CountFunc(ref this);
         
-        public DuplicatesOccurrence DuplicatesOccurrenceStatus => DuplicatesOccurrence.Possible;
+        public Duplicates DuplicatesStatus => Duplicates.Possible;
         
         public QueryCountConfidence Confidence => _inner.Confidence;
 

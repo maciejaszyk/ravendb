@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using BenchmarkDotNet.Running;
 using Micro.Benchmark.Benchmarks.LZ4;
@@ -17,8 +16,6 @@ namespace Micro.Benchmark
 
             Console.WriteLine($"{nameof(Avx)} support: {Avx.IsSupported}");
             Console.WriteLine($"{nameof(Avx2)} support: {Avx2.IsSupported}");
-            Console.WriteLine($"{nameof(Avx512F)} support: {Avx512F.IsSupported}");
-            Console.WriteLine($"{nameof(Vector512)} support: {Vector512.IsHardwareAccelerated}");
 
             BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
         }

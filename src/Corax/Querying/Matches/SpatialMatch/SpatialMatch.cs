@@ -68,7 +68,7 @@ public sealed class SpatialMatch<TBoosting> : IQueryMatch
         _fieldRootPage = _indexSearcher.FieldCache.GetLookupRootPage(field.FieldName);
     }
 
-    public DuplicatesOccurrence DuplicatesOccurrenceStatus => DuplicatesOccurrence.Possible;
+    public Duplicates DuplicatesStatus => Duplicates.Possible;
     
     private bool GoNextMatch()
     {

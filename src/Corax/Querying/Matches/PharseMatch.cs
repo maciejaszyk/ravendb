@@ -44,7 +44,7 @@ public struct PhraseMatch<TInner> : IQueryMatch
 
     public long Count => _inner.Count;
     
-    public DuplicatesOccurrence DuplicatesOccurrenceStatus => DuplicatesOccurrence.Possible;
+    public Duplicates DuplicatesStatus => Duplicates.Possible;
 
     public SkipSortingResult AttemptToSkipSorting()
     {
