@@ -49,6 +49,9 @@ namespace Corax.Querying.Matches
         private TermMatch _currentTerm;
         private MultiTermReader _termReader;
         private readonly ByteStringContext _context;
+        private GrowableBitArray _results;
+        private long _lastReturnedEntryId = -1;
+        private bool _allDone;
 
         public bool IsBoosting => _isBoosting;
         public long Count => _totalResults;
@@ -67,7 +70,7 @@ namespace Corax.Querying.Matches
             _isBoosting = field.HasBoost;
             _token = token;
             _current = QueryMatch.Start;
-            if (_inner.IsFillSupported && _isBoosting == false)
+            if (false && _inner.IsFillSupported && _isBoosting == false)
                 _termReader = new MultiTermReader(indexSearcher);
             else
             {
@@ -75,7 +78,10 @@ namespace Corax.Querying.Matches
                 if (result == false)
                     _current = QueryMatch.Invalid;
                 else
+                {
+                    _results = new GrowableBitArray(context, indexSearcher.LastEntryId);
                     _readTerms = 1;
+                }
             }
 
             _totalResults = 0;
@@ -96,9 +102,7 @@ namespace Corax.Querying.Matches
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int Fill(Span<long> buffer)
         {
-            return _inner.IsFillSupported && _isBoosting == false
-                ? FillWithReader(buffer)
-                : FillWithTermMatches(buffer);
+            return FillWithTermMatchesNotForStreaming(buffer);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -343,6 +347,46 @@ namespace Corax.Querying.Matches
             }
             _totalResults += count;
             return count;
+        }
+        
+#if !DEBUG
+        [SkipLocalsInit]
+#endif
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int FillWithTermMatchesNotForStreaming(Span<long> buffer)
+        {
+            while (_current != QueryMatch.Invalid)
+            {
+                var read = _currentTerm.FillGrowableBuffer(_results);
+
+                if (read == 0)
+                {
+                    _token.ThrowIfCancellationRequested();
+                    AddTermToBm25();
+                    if (_inner.Next(out _currentTerm) == false || 
+                        ++_readTerms >= _maxNumberOfTerms)
+                    {
+                        _current = QueryMatch.Invalid;
+                        _lastReturnedEntryId = 0;
+                        goto End;
+                    }
+                }
+            }
+            
+            End:
+            var it = _results.GetIterator(_lastReturnedEntryId);
+            var currentIdx = it.Fill(buffer);
+
+            if (currentIdx == 0)
+            {
+                _current = QueryMatch.Invalid;
+                _allDone = true;
+                _results.Dispose();
+                return 0;
+            }
+            
+            _lastReturnedEntryId = buffer[currentIdx - 1] +1;
+            return currentIdx;
         }
 
         private void UnlikelyGrowBufferOfTermMatches()

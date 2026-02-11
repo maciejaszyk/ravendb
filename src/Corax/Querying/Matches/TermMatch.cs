@@ -20,11 +20,13 @@ namespace Corax.Querying.Matches
     public unsafe struct TermMatch : IQueryMatch
     {
         private readonly delegate*<ref TermMatch, Span<long>, int> _fillFunc;
+        private readonly delegate*<ref TermMatch, GrowableBitArray, int> _fillGrowableBufferFunc;
         private readonly delegate*<ref TermMatch, Span<long>, int, int> _andWithFunc;
         private readonly delegate*<ref TermMatch, Span<long>, Span<float>, float, void> _scoreFunc;
         private readonly delegate*<ref TermMatch, QueryInspectionNode> _inspectFunc;
 
         private bool _returnedValue;
+        private readonly IndexSearcher _indexSearcher;
         private readonly long _totalResults;
         private long _current;
         internal Bm25Relevance _bm25Relevance;
@@ -32,11 +34,12 @@ namespace Corax.Querying.Matches
         private Container.Item _containerItem;
         private FastPForBufferedReader _containerReader;
         private ByteStringContext _ctx;
+        private bool _done;
         public bool IsBoosting => _scoreFunc != null;
         public long Count => _totalResults;
-        
+
         public DuplicatesOccurrence DuplicatesOccurrenceStatus => DuplicatesOccurrence.NotPossible;
-        
+
 #if DEBUG
         public string Term;
 #endif
@@ -53,13 +56,16 @@ namespace Corax.Querying.Matches
             ByteStringContext ctx,
             long totalResults,
             delegate*<ref TermMatch, Span<long>, int> fillFunc,
+            delegate*<ref TermMatch, GrowableBitArray, int> fillGrowableBufferFunc,
             delegate*<ref TermMatch, Span<long>, int, int> andWithFunc,
             delegate*<ref TermMatch, Span<long>, Span<float>, float, void> scoreFunc = null,
             delegate*<ref TermMatch, QueryInspectionNode> inspectFunc = null)
         {
+            _indexSearcher = indexSearcher;
             _totalResults = totalResults;
             _current = QueryMatch.Start;
             _fillFunc = fillFunc;
+            _fillGrowableBufferFunc = fillGrowableBufferFunc;
             _andWithFunc = andWithFunc;
             _scoreFunc = scoreFunc;
             _inspectFunc = inspectFunc;
@@ -86,6 +92,11 @@ namespace Corax.Querying.Matches
                 return 0;
             }
 
+            static int FillGrowableBufferFunc(ref TermMatch term, GrowableBitArray buffer)
+            {
+                return 0;
+            }
+
             static QueryInspectionNode InspectFunc(ref TermMatch term)
             {
                 return new QueryInspectionNode($"{nameof(TermMatch)} [Empty]",
@@ -97,7 +108,7 @@ namespace Corax.Querying.Matches
                     });
             }
 
-            return new TermMatch(indexSearcher, ctx, 0, &FillFunc, &AndWithFunc, inspectFunc: &InspectFunc)
+            return new TermMatch(indexSearcher, ctx, 0, &FillFunc, &FillGrowableBufferFunc, &AndWithFunc, inspectFunc: &InspectFunc)
             {
 #if DEBUG
                 Term = "<empty>"
@@ -114,6 +125,19 @@ namespace Corax.Querying.Matches
                 {
                     term._returnedValue = true;
                     matches[0] = term._current;
+                    return 1;
+                }
+
+                return 0;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            static int FillGrowableBufferFunc(ref TermMatch term, GrowableBitArray matches)
+            {
+                if (term._returnedValue == false)
+                {
+                    term._returnedValue = true;
+                    matches.Add(term._current);
                     return 1;
                 }
 
@@ -169,7 +193,7 @@ namespace Corax.Querying.Matches
                 current = bm25Relevance.Add(value);
             }
 
-            return new TermMatch(indexSearcher, ctx, 1, &FillFunc, &AndWithFunc, scoreFunc: isBoosting ? &ScoreFunc : null, inspectFunc: &InspectFunc)
+            return new TermMatch(indexSearcher, ctx, 1, &FillFunc, &FillGrowableBufferFunc, &AndWithFunc, scoreFunc: isBoosting ? &ScoreFunc : null, inspectFunc: &InspectFunc)
             {
                 _current = bm25Relevance is not null
                     ? current
@@ -211,6 +235,49 @@ namespace Corax.Querying.Matches
                 }
 
                 return results;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            static unsafe int FillGrowableBufferFuncFunc<TBoostingMode>(ref TermMatch term, GrowableBitArray matches) where TBoostingMode : IBoostingMarker
+            {
+                long totalResults = 0;
+
+                if (term._done == false)
+                {
+                    using var _ = term._indexSearcher.Allocator.Allocate(1024 * sizeof(long), out ByteString buffer);
+
+                    while (true)
+                    {
+                        Span<long> bufferSpan = new Span<long>((long*)buffer.Ptr, 1024);
+                        var results = term._containerReader.Fill((long*)buffer.Ptr, 1024);
+                        totalResults += results;
+                        if (results == 0)
+                        {
+                            term._done = true;
+                            term._containerReader.Dispose();
+                            break;
+                        }
+
+                        if (typeof(TBoostingMode) == typeof(HasBoosting))
+                        {
+                            if (term._bm25Relevance.IsStored)
+                                term._bm25Relevance.Process(bufferSpan, results);
+                            else
+                                EntryIdEncodings.DecodeAndDiscardFrequency(bufferSpan, results);
+                        }
+                        else
+                        {
+                            EntryIdEncodings.DecodeAndDiscardFrequency(bufferSpan, results);
+                        }
+
+                        matches.Add(bufferSpan.Slice(0, results));
+                    }
+                    
+                    return (int)Math.Min(totalResults, int.MaxValue); //todo func should be boolean tbh
+                    
+                }
+
+                return 0;
             }
 
             [SkipLocalsInit]
@@ -288,7 +355,7 @@ namespace Corax.Querying.Matches
 
             var itemsCount = VariableSizeEncoding.Read<int>(containerItem.Address, out var offset);
             var reader = new FastPForBufferedReader(ctx, containerItem.Address + offset, containerItem.Length - offset);
-            return new TermMatch(indexSearcher, ctx, itemsCount, isBoosting ? &FillFunc<HasBoosting> : &FillFunc<NoBoosting>,
+            return new TermMatch(indexSearcher, ctx, itemsCount, isBoosting ? &FillFunc<HasBoosting> : &FillFunc<NoBoosting>, isBoosting ? &FillGrowableBufferFuncFunc<HasBoosting> : &FillGrowableBufferFuncFunc<NoBoosting>,
                 isBoosting ? &AndWithFunc<HasBoosting> : &AndWithFunc<NoBoosting>, inspectFunc: &InspectFunc, scoreFunc: isBoosting ? &ScoreFunc : null)
             {
                 _bm25Relevance = isBoosting
@@ -309,18 +376,18 @@ namespace Corax.Querying.Matches
             {
                 if (matchesCount == 0)
                     return 0;
-                
+
                 var it = term._set;
                 // There is no element equal to or greater than `min(matches)-1`. No matches possible anyway.
                 if (it.Seek(EntryIdEncodings.PrepareIdForSeekInPostingList(matches[0] - 1)) == false)
                     return 0;
-                
+
                 Span<long> postingListBuffer = stackalloc long[1024];
                 ref var postingListStartPtr = ref MemoryMarshal.GetReference(postingListBuffer);
-                
+
                 ref var resultStartPtr = ref MemoryMarshal.GetReference(matches);
                 var resultIdx = 0;
-                
+
                 ref var matchesStartPtr = ref MemoryMarshal.GetReference(matches);
                 var matchesIdx = 0;
                 var matchesMax = matches[matchesCount - 1];
@@ -331,11 +398,11 @@ namespace Corax.Querying.Matches
                     //posting list is empty
                     if (it.Fill(postingListBuffer, out var postingListCount, maxValidValue) == false || postingListCount == 0)
                         break;
-                    
+
                     var postingListMinValue = (long)EntryIdEncodings.DecodeAndDiscardFrequency(Unsafe.Add(ref postingListStartPtr, 0));
                     if (matchesMax < postingListMinValue)
                         continue;
-                    
+
                     var postingListMaxValue = (long)EntryIdEncodings.DecodeAndDiscardFrequency(Unsafe.Add(ref postingListStartPtr, postingListCount - 1));
                     var matchesMinValue = Unsafe.Add(ref matchesStartPtr, matchesIdx);
                     if (postingListMaxValue < matchesMinValue)
@@ -346,17 +413,17 @@ namespace Corax.Querying.Matches
                     {
                         var currentMatchesMin = Unsafe.Add(ref matchesStartPtr, matchesIdx);
                         var currentPostingListMin = (long)EntryIdEncodings.DecodeAndDiscardFrequency(Unsafe.Add(ref postingListStartPtr, postingListIdx));
-                        
+
                         if (typeof(TBoostingMode) == typeof(HasBoosting) && currentMatchesMin == currentPostingListMin)
                             term._bm25Relevance.Add(Unsafe.Add(ref postingListStartPtr, postingListIdx));
-                        
+
                         Unsafe.Add(ref resultStartPtr, resultIdx) = currentMatchesMin;
                         resultIdx += (currentMatchesMin == currentPostingListMin).ToInt32();
                         postingListIdx += (currentMatchesMin >= currentPostingListMin).ToInt32();
                         matchesIdx += (currentMatchesMin <= currentPostingListMin).ToInt32();
                     }
                 }
-                
+
                 return resultIdx;
             }
 
@@ -514,6 +581,47 @@ namespace Corax.Querying.Matches
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            static int FillGrowableBuffer<TBoostingMode>(ref TermMatch term, GrowableBitArray matches) where TBoostingMode : IBoostingMarker
+            {
+                if (term._done == false)
+                {
+                    using var _ = term._indexSearcher.Allocator.Allocate(1024 * sizeof(long), out ByteString buffer);
+                    int totalResults = 0;
+                    while (true)
+                    {
+                        Span<long> bufferSpan = new Span<long>((long*)buffer.Ptr, 1024);
+                        term._set.Fill(bufferSpan, out var results);
+                        totalResults += results;
+                        if (results == 0)
+                        {
+                            term._done = true;
+                            term._containerReader.Dispose();
+                            break;
+                        }
+
+                        if (typeof(TBoostingMode) == typeof(HasBoosting))
+                        {
+                            if (term._bm25Relevance.IsStored)
+                                term._bm25Relevance.Process(bufferSpan, results);
+                            else
+                                EntryIdEncodings.DecodeAndDiscardFrequency(bufferSpan, results);
+                        }
+                        else
+                        {
+                            EntryIdEncodings.DecodeAndDiscardFrequency(bufferSpan, results);
+                        }
+
+                        matches.Add(bufferSpan.Slice(0, results));
+                    }
+                    
+                    return totalResults; //todo func should be boolean tbh
+                    
+                }
+
+                return 0;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             static int FillFunc<TBoostingMode>(ref TermMatch term, Span<long> matches) where TBoostingMode : IBoostingMarker
             {
                 int i = 0;
@@ -570,6 +678,12 @@ namespace Corax.Querying.Matches
                     (isBoosting: true, isStored: false) => &FillFunc<HasBoostingNoStore>,
                     (_, _) => &FillFunc<NoBoosting>
                 },
+                (isBoosting, isStored) switch
+                {
+                    (isBoosting: true, isStored: true) => &FillGrowableBuffer<HasBoosting>,
+                    (isBoosting: true, isStored: false) => &FillGrowableBuffer<HasBoostingNoStore>,
+                    (_, _) => &FillGrowableBuffer<NoBoosting>
+                },
                 (useAccelerated, isBoosting, isStored) switch
                 {
                     (useAccelerated: true, isBoosting: true, isStored: true) => &AndWithVectorizedFunc<HasBoosting>,
@@ -587,6 +701,12 @@ namespace Corax.Querying.Matches
         public int Fill(Span<long> matches)
         {
             return _fillFunc(ref this, matches);
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int FillGrowableBuffer(GrowableBitArray buffer)
+        {
+            return _fillGrowableBufferFunc(ref this, buffer);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

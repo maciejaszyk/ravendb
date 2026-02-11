@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using Corax.Querying.Matches.Meta;
+using Corax.Utils;
 using Sparrow.Server;
 
 namespace Corax.Querying.Matches
@@ -29,6 +30,10 @@ namespace Corax.Querying.Matches
         private SkipSortingResult _skipSortingResult;
 
         private int _fillCallCounter;
+        private bool _returnedAllDocuments;
+        private bool _growableBitArrayFilled;
+        private GrowableBitArray _results;
+        private long _lastReturnedId;
         public SkipSortingResult AttemptToSkipSorting() => _skipSortingResult;
 
         public bool IsBoosting => _inner.IsBoosting || _outer.IsBoosting;
@@ -133,6 +138,6 @@ namespace Corax.Querying.Matches
         }
 
         string DebugView => Inspect().ToString();
-        public DuplicatesOccurrence DuplicatesOccurrenceStatus => DuplicatesOccurrence.Possible;
+        public DuplicatesOccurrence DuplicatesOccurrenceStatus => DuplicatesOccurrence.NotPossible;
     }
 }

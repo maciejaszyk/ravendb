@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using Corax.Querying.Matches.Meta;
+using Corax.Utils;
 using Sparrow.Server;
 using Sparrow.Server.Utils;
 
@@ -25,16 +26,19 @@ namespace Corax.Querying.Matches
         public bool IsBoosting => _inner.IsBoosting || _outer.IsBoosting;
         public long Count => _totalResults;
 
-        private readonly ByteStringContext _context;
         
         /// <summary>
         /// Indicates that the buffer is used by the AndWith method.
         /// </summary>
         private bool _isAndWithBuffer;
 
-        private GrowableBuffer<long, Progressive<long>> _buffer;
+        private GrowableBitArray _results;
+        private bool _loaded;
+        private bool _done;
 
         private bool _doNotSortResults;
+        private readonly IndexSearcher _indexSearcher;
+        private long _lastReturnedEntryId;
 
         public SkipSortingResult AttemptToSkipSorting()
         {
@@ -46,7 +50,7 @@ namespace Corax.Querying.Matches
 
         public QueryCountConfidence Confidence => _confidence;
 
-        private AndNotMatch(ByteStringContext context, 
+        private AndNotMatch(IndexSearcher searcher, 
             in TInner inner, in TOuter outer,
             long totalResults, QueryCountConfidence confidence, CancellationToken token)
         {
@@ -56,144 +60,47 @@ namespace Corax.Querying.Matches
             _outer = outer;
             _confidence = confidence;
             _token = token;
-
-            _context = context;
+            _indexSearcher = searcher;
             _isAndWithBuffer = false;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int Fill(Span<long> matches)
         {
-            if (_isAndWithBuffer)
-                throw new InvalidOperationException($"We cannot execute `{nameof(Fill)}` after initiating a `{nameof(AndWith)}` operation.");
-            // Check if this is the second time we enter or not. 
-            if (_buffer.IsInitialized == false)
+            if (_loaded == false && _done == false)
             {
-                _buffer = new GrowableBuffer<long, Progressive<long>>();
-                int iterations = 0;
+                _results = new GrowableBitArray(_indexSearcher.Allocator, _indexSearcher.LastEntryId);
+                using var outerResult = new GrowableBitArray(_indexSearcher.Allocator, _indexSearcher.LastEntryId); 
                 
-                _buffer.Init(_context, _outer.Count);
-                while (_outer.Fill(_buffer.GetSpace()) is var read)
-                {
-                    if (read == 0)
-                        break;
-                    
-                    _buffer.AddUsage(read);
-                    iterations++;
-                }
+                while (_inner.Fill(matches) is var read and > 0)
+                    _results.Add(matches[..read]);
+                while (_outer.Fill(matches) is var read and > 0)
+                    outerResult.Add(matches[..read]);
                 
-                // The problem is that multiple Fill calls do not ensure that we will get a sequence of ordered
-                // values, therefore we must ensure that we get a 'sorted' sequence ensuring those happen.
-                if (iterations > 1 && _buffer.Count > 1)
-                {
-                    var newCount = Sorting.SortAndRemoveDuplicates(_buffer.Results);
-                    _buffer.Truncate(newCount);
-                }
+                outerResult.Invert();
+                _results.And(outerResult);
+                _loaded = true;
+                _lastReturnedEntryId = 0;
             }
+            
+            var iterator = _results.GetIterator(_lastReturnedEntryId);
+            var currentIdx = iterator.Fill(matches);
 
-            // The outer is empty, so item in inner will be returned. 
-            if (_buffer.Count == 0)
-                return _inner.Fill(matches);
-
-            // Now it is time to run the other part of the algorithm, which is getting the Inner data until we fill the buffer.
-            while (true)
+            if (currentIdx == 0)
             {
-                int totalResults = 0;
-                int iterations = 0;
-
-                var resultsSpan = matches;
-                while (resultsSpan.Length > 0)
-                {
-                    // RavenDB-17750: We have to fill everything possible UNTIL there are no more matches availables.
-                    var results = _inner.Fill(resultsSpan);
-                    if (results == 0)                         
-                        break; // We are certainly done. As `Fill` must not return 0 results unless it is done. 
-
-                    totalResults += results;
-                    iterations++;
-
-                    resultsSpan = resultsSpan.Slice(results);
-                }
-
-                // Again multiple Fill calls do not ensure that we will get a sequence of ordered
-                // values, therefore we must ensure that we get a 'sorted' sequence ensuring those happen.
-                if (_doNotSortResults == false && iterations > 1)
-                {
-                    // We need to sort and remove duplicates.
-                    
-                    _token.ThrowIfCancellationRequested();
-                    totalResults = Sorting.SortAndRemoveDuplicates(matches.Slice(0, totalResults));
-                }
-
-                // This is an early bailout, the only way this can happen is when Fill returns 0 and we dont have
-                // any match to return. 
-                if (totalResults == 0)
-                    return 0;
-                
-                // We have matches and therefore we need now to remove the ones found in the outer buffer.
-                Span<long> outerBuffer = _buffer.Results;
-                Span<long> innerBuffer = matches.Slice(0, totalResults);
-                _token.ThrowIfCancellationRequested();
-                totalResults = MergeHelper.AndNot(innerBuffer, innerBuffer, outerBuffer);
-
-                // Since we would require to sort again if we dont return, we return what we have instead.
-                if (totalResults != 0)
-                    return totalResults; 
-
-                // If can happen that we filtered out everything, but we cannot return 0. Therefore, we will
-                // continue executing until we run out of any potential inner match. 
+                _done = true;
+                _results.Dispose();
+                return 0;
             }
+            
+            _lastReturnedEntryId = matches[currentIdx - 1] + 1;
+            return currentIdx;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int AndWith(Span<long> buffer, int matches)
         {
-            // This is not an AndWith memoized buffer, therefore we need to acquire a buffer to store the results
-            // before continuing.   
-            if (_isAndWithBuffer == false)
-            {
-                _token.ThrowIfCancellationRequested();
-                var andWithBuffer = new GrowableBuffer<long, Progressive<long>>();
-                andWithBuffer.Init(_context, Count);
-
-                // Now it is time to run the other part of the algorithm, which is getting the Inner data until we fill the buffer.
-                int iterations = 0;
-                while (Fill(andWithBuffer.GetSpace()) is var read)
-                {
-                    if (read == 0)
-                        break;
-                    
-                    _token.ThrowIfCancellationRequested();
-                    andWithBuffer.AddUsage(read);
-                    iterations++;
-                }
-
-                // Again multiple Fill calls do not ensure that we will get a sequence of ordered
-                // values, therefore we must ensure that we get a 'sorted' sequence ensuring those happen.
-                if (iterations > 1 && andWithBuffer.Count > 0)
-                {
-                    // We need to sort and remove duplicates.
-                    _token.ThrowIfCancellationRequested();
-                    var newCount = Sorting.SortAndRemoveDuplicates(andWithBuffer.Results);
-                    andWithBuffer.Truncate(newCount);
-                }
-                
-                // Now we signal that this is now indeed an AndWith memoized buffer, no Fill allowed from now on.                
-                _isAndWithBuffer = true;
-                _buffer.Dispose();
-                _buffer = andWithBuffer;
-                
-                //Since we evaluated whole query we exactly know how many items it returns.
-                _totalResults = _buffer.Count;
-                _confidence = QueryCountConfidence.High;
-            }
-
-            // If we don't have any result, no need to do anything. And with nothing will mean that there is nothing.
-            if (_buffer.Count == 0)
-                return 0;
-
-            _token.ThrowIfCancellationRequested();
-            return MergeHelper.And(buffer, buffer.Slice(0, matches), _buffer.Results);
+            throw new NotSupportedException($"{nameof(AndNotMatch)} does not support the operation of {nameof(AndWith)}.");
         }
 
 
@@ -229,7 +136,7 @@ namespace Corax.Querying.Matches
             else
                 confidence = inner.Confidence.Min(outer.Confidence);
 
-            return new AndNotMatch<TInner, TOuter>(searcher.Allocator, in inner, in outer, inner.Count, confidence, token);
+            return new AndNotMatch<TInner, TOuter>(searcher, in inner, in outer, inner.Count, confidence, token);
         }
     }
 }

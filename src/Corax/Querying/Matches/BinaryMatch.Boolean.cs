@@ -5,6 +5,9 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Corax.Querying.Matches.Meta;
+using Corax.Utils;
+using Sparrow;
+using Sparrow.Server.Collections;
 using Sparrow.Server.Utils;
 
 namespace Corax.Querying.Matches
@@ -17,72 +20,46 @@ namespace Corax.Querying.Matches
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             static int FillFunc(ref BinaryMatch<TInner, TOuter, TBinaryOperationMarker> match, Span<long> matches)
             {
+                if (match._returnedAllDocuments)
+                    return 0;
                 match._token.ThrowIfCancellationRequested();
-                ref var inner = ref match._inner;
-                ref var outer = ref match._outer;
-                while (true)
+                if (match._growableBitArrayFilled == false)
                 {
-                    int totalResults = 0;
+                    ref var inner = ref match._inner;
+                    ref var outer = ref match._outer;
 
-                    // PERF: An alternative implementation would be to perform OR in place. The upside is that every improvement on
-                    //       OR would impact everywhere this happens, but the vectorized Sort may also tip the balance here. Another
-                    //       good behavior would be that in cases of many duplicates we will have a better use of the buffer because
-                    //       OR will also deduplicate on every call. 
+                    var innerBitArray = new GrowableBitArray(match._indexSearcher.Allocator, match._indexSearcher.LastEntryId);
+                    var outerBitArray = new GrowableBitArray(match._indexSearcher.Allocator, match._indexSearcher.LastEntryId);
 
-                    var resultsSpan = matches;
-                    while (resultsSpan.Length > 0)
+                    while (inner.Fill(matches) is var read and > 0)
                     {
-                        // RavenDB-17750: We have to fill everything possible UNTIL there are no more matches available.
-                        var results = inner.Fill(resultsSpan);
-                        
-                        if (results == 0)
-                            break;
-                        totalResults += results;
-
-                        resultsSpan = resultsSpan.Slice(results);
+                        innerBitArray.Add(matches[..read]);
                     }
-                    
-                    // The problem is that multiple Fill calls do not ensure that we will get a sequence of ordered
-                    // values, therefore we must ensure that we get a 'sorted' sequence ensuring those happen.
-                    if (match._inner.AttemptToSkipSorting() != SkipSortingResult.ResultsNativelySorted)
+                
+                    while (outer.Fill(matches) is var read and > 0)
                     {
-                        if (totalResults > 0)
-                        {
-                            totalResults = Sorting.SortAndRemoveDuplicates(matches[0..totalResults]);
-                        }
+                        outerBitArray.Add(matches[..read]);
                     }
-
-                    if (totalResults == 0)
-                    {
-                        match._memoizedOuter?.InnerRetriever(out outer);
-                        match._memoizedOuter?.Dispose();
-                        match._memoizedOuter = null;
-                        return 0;
-                    }
-                    
-                    match._token.ThrowIfCancellationRequested();
-                    
-                    // We got more than the matches buffer, we'll need to call AndWith multiple times
-                    // which can be really expensive, instead, let's memoize the outer and remember that 
-                    if (resultsSpan.Length == 0 && match._memoizedOuter is null)
-                    {
-                        match._memoizedOuter = new MemoizationMatchProvider<TOuter>(match._indexSearcher, match._outer);
-                        match._memoizedOuter.SortingRequired();
-                    }
-
-                    if (match._memoizedOuter != null)
-                    {
-                        Span<long> results = match._memoizedOuter.FillAndRetrieve();
-                        totalResults = MergeHelper.And(matches, matches[..totalResults], results);
-                    }
-                    else
-                    {
-                        totalResults = outer.AndWith(matches, totalResults);
-                    }
-
-                    if (totalResults != 0)
-                        return totalResults;
+                
+                    //Perform AND
+                    innerBitArray.And(outerBitArray);
+                    match._results = innerBitArray;
+                    outerBitArray.Dispose();
+                    match._growableBitArrayFilled = true;
+                    match._lastReturnedId = 0;
                 }
+
+                var iterator = match._results.GetIterator(match._lastReturnedId);
+                var totalRead = iterator.Fill(matches);
+                if (totalRead is 0)
+                {
+                    match._results.Dispose();
+                    match._returnedAllDocuments = true;
+                    return 0;
+                }
+                
+                match._lastReturnedId = matches[totalRead - 1] + 1;
+                return totalRead;
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -162,6 +139,50 @@ namespace Corax.Querying.Matches
             [SkipLocalsInit]
 #endif
             static int FillFunc(ref BinaryMatch<TInner, TOuter, TBinaryOperationMarker> match, Span<long> matches)
+            {
+                if (match._returnedAllDocuments)
+                    return 0;
+                match._token.ThrowIfCancellationRequested();
+                if (match._growableBitArrayFilled == false)
+                {
+                    ref var inner = ref match._inner;
+                    ref var outer = ref match._outer;
+
+                    var innerBitArray = new GrowableBitArray(match._indexSearcher.Allocator, match._indexSearcher.LastEntryId);
+
+                    while (inner.Fill(matches) is var read and > 0)
+                    {
+                        innerBitArray.Add(matches[..read]);
+                    }
+                
+                    while (outer.Fill(matches) is var read and > 0)
+                    {
+                        innerBitArray.Add(matches[..read]);
+                    }
+                
+                   
+                    match._results = innerBitArray;
+                    match._growableBitArrayFilled = true;
+                    match._lastReturnedId = 0;
+                }
+
+                var iterator = match._results.GetIterator(match._lastReturnedId);
+                var currentIdx = iterator.Fill(matches);
+                if (currentIdx == 0)
+                {
+                    match._results.Dispose();
+                    match._returnedAllDocuments = true;
+                    return 0;
+                }
+
+                match._lastReturnedId = matches[currentIdx - 1] + 1;
+                return currentIdx;
+            }
+
+#if !DEBUG
+            [SkipLocalsInit]
+#endif
+            static int FillFunc2(ref BinaryMatch<TInner, TOuter, TBinaryOperationMarker> match, Span<long> matches)
             {
                 match._token.ThrowIfCancellationRequested();
                 ref var inner = ref match._inner;
