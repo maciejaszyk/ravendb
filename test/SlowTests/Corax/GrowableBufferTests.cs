@@ -11,33 +11,33 @@ namespace SlowTests.Corax;
 public class GrowableBufferTests(ITestOutputHelper output) : NoDisposalNoOutputNeeded(output)
 {
     [RavenMultiplatformTheory(RavenTestCategory.Corax, RavenArchitecture.AllX64)]
-    [InlineData(4 * Sparrow.Global.Constants.Size.Megabyte)]
-    [InlineData(8 * Sparrow.Global.Constants.Size.Megabyte)]
-    public void CanExtendAndNotLooseAnythingSingle(int size) => CanExtendAndNotLooseAnythingBase<float>(size);
-    
+    [InlineDataWithRandomSeed(4 * Sparrow.Global.Constants.Size.Megabyte)]
+    [InlineDataWithRandomSeed(8 * Sparrow.Global.Constants.Size.Megabyte)]
+    public void CanExtendAndNotLooseAnythingSingle(int size, int seed) => CanExtendAndNotLooseAnythingBase<float>(size, seed);
+
     [RavenMultiplatformTheory(RavenTestCategory.Corax, RavenArchitecture.AllX64)]
-    [InlineData(4 * Sparrow.Global.Constants.Size.Megabyte)]
-    [InlineData(8 * Sparrow.Global.Constants.Size.Megabyte)]
-    public void CanExtendAndNotLooseAnything(int size) => CanExtendAndNotLooseAnythingBase<long>(size);
-    
+    [InlineDataWithRandomSeed(4 * Sparrow.Global.Constants.Size.Megabyte)]
+    [InlineDataWithRandomSeed(8 * Sparrow.Global.Constants.Size.Megabyte)]
+    public void CanExtendAndNotLooseAnything(int size, int seed) => CanExtendAndNotLooseAnythingBase<long>(size, seed);
+
     [RavenMultiplatformTheory(RavenTestCategory.Corax, RavenArchitecture.AllX64)]
-    [InlineData(16 * Sparrow.Global.Constants.Size.Megabyte)]
-    [InlineData(32 * Sparrow.Global.Constants.Size.Megabyte)]
-    public void CanExtendAndNotLooseAnythingExtended(int size) => CanExtendAndNotLooseAnythingBase<long>(size);
-    
+    [InlineDataWithRandomSeed(16 * Sparrow.Global.Constants.Size.Megabyte)]
+    [InlineDataWithRandomSeed(32 * Sparrow.Global.Constants.Size.Megabyte)]
+    public void CanExtendAndNotLooseAnythingExtended(int size, int seed) => CanExtendAndNotLooseAnythingBase<long>(size, seed);
+
     [RavenMultiplatformTheory(RavenTestCategory.Corax, RavenArchitecture.AllX64)]
-    [InlineData(16 * Sparrow.Global.Constants.Size.Megabyte)]
-    [InlineData(32 * Sparrow.Global.Constants.Size.Megabyte)]
-    public void CanExtendAndNotLooseAnythingExtendedSingle(int size) => CanExtendAndNotLooseAnythingBase<float>(size);
-    
-    private static void CanExtendAndNotLooseAnythingBase<T>(int size) where T : unmanaged, INumber<T>
+    [InlineDataWithRandomSeed(16 * Sparrow.Global.Constants.Size.Megabyte)]
+    [InlineDataWithRandomSeed(32 * Sparrow.Global.Constants.Size.Megabyte)]
+    public void CanExtendAndNotLooseAnythingExtendedSingle(int size, int seed) => CanExtendAndNotLooseAnythingBase<float>(size, seed);
+
+    private static void CanExtendAndNotLooseAnythingBase<T>(int size, int seed) where T : unmanaged, INumber<T>
     {
         using var bsc = new ByteStringContext(SharedMultipleUseFlag.None);
         using var growableBuffer = new GrowableBuffer<T, Progressive<T>>();
         growableBuffer.Init(bsc, 16);
         var count = 0;
-        var random = new Random(15235);
-        var random2 = new Random(15235);
+        var random = new Random(seed);
+        var random2 = new Random(seed);
 
         while (Fill(growableBuffer.GetSpace()) is var read and > 0)
         {

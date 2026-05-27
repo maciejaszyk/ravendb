@@ -109,11 +109,75 @@ public unsafe struct GrowableBuffer<TNumber, TGrowth> : IDisposable
 
     private void Grow()
     {
-        var newSize = _growthCalculator.GetNewSize(_buffer.Length);
+        var oldBuffer = _buffer;
+        var oldCount = _count;
+
+        var newSize = _growthCalculator.GetNewSize(oldBuffer.Length);
         _context.Allocate(newSize, out ByteString newBuffer);
-        new Span<TNumber>(_buffer.Ptr, _count).CopyTo(new Span<TNumber>(newBuffer.Ptr, _count));
+
+        if (RangesOverlap(oldBuffer.Ptr, oldBuffer.Length, newBuffer.Ptr, newBuffer.Length))
+            throw new InvalidOperationException(
+                $"GrowableBuffer allocator returned overlapping ranges. " +
+                $"old={(long)oldBuffer.Ptr:X} oldLen={oldBuffer.Length}, " +
+                $"new={(long)newBuffer.Ptr:X} newLen={newBuffer.Length}, count={oldCount}");
+
+        var oldSpan = new Span<TNumber>(oldBuffer.Ptr, oldCount);
+        var newSpan = new Span<TNumber>(newBuffer.Ptr, oldCount);
+        var hashBytes = (long)oldCount * Unsafe.SizeOf<TNumber>();
+
+        var newHashAtAllocate     = Fnv1aHash(newBuffer.Ptr, hashBytes);
+        var oldHashBefore         = Fnv1aHash(oldBuffer.Ptr, hashBytes);
+        var newHashJustBeforeCopy = Fnv1aHash(newBuffer.Ptr, hashBytes);
+        oldSpan.CopyTo(newSpan);
+        var oldHashAfter = Fnv1aHash(oldBuffer.Ptr, hashBytes);
+        var newHashAfter = Fnv1aHash(newBuffer.Ptr, hashBytes);
+
+        if (newHashAtAllocate != newHashJustBeforeCopy)
+            throw new InvalidOperationException(
+                $"GrowableBuffer DESTINATION mutated BEFORE copy.{Environment.NewLine}" +
+                $"  old = 0x{(long)oldBuffer.Ptr:X}{Environment.NewLine}" +
+                $"  new = 0x{(long)newBuffer.Ptr:X}{Environment.NewLine}" +
+                $"  count = {oldCount} {typeof(TNumber).Name} ({hashBytes} bytes){Environment.NewLine}" +
+                $"  newHashAtAllocate     = 0x{newHashAtAllocate:X16}{Environment.NewLine}" +
+                $"  newHashJustBeforeCopy = 0x{newHashJustBeforeCopy:X16}");
+
+        if (oldHashBefore != oldHashAfter)
+            throw new InvalidOperationException(
+                $"GrowableBuffer SOURCE mutated during copy.{Environment.NewLine}" +
+                $"  old = 0x{(long)oldBuffer.Ptr:X}{Environment.NewLine}" +
+                $"  new = 0x{(long)newBuffer.Ptr:X}{Environment.NewLine}" +
+                $"  count = {oldCount} {typeof(TNumber).Name} ({hashBytes} bytes){Environment.NewLine}" +
+                $"  oldHashBefore = 0x{oldHashBefore:X16}{Environment.NewLine}" +
+                $"  oldHashAfter  = 0x{oldHashAfter:X16}");
+
+        if (oldHashAfter != newHashAfter)
+            throw new InvalidOperationException(
+                $"GrowableBuffer DESTINATION mutated during copy.{Environment.NewLine}" +
+                $"  old = 0x{(long)oldBuffer.Ptr:X}{Environment.NewLine}" +
+                $"  new = 0x{(long)newBuffer.Ptr:X}{Environment.NewLine}" +
+                $"  count = {oldCount} {typeof(TNumber).Name} ({hashBytes} bytes){Environment.NewLine}" +
+                $"  oldHashBefore = 0x{oldHashBefore:X16}{Environment.NewLine}" +
+                $"  oldHashAfter  = 0x{oldHashAfter:X16}   (source unchanged){Environment.NewLine}" +
+                $"  newHashAfter  = 0x{newHashAfter:X16}   (destination differs from source)");
+
         _context.Release(ref _buffer);
         _buffer = newBuffer;
+    }
+
+    private static bool RangesOverlap(byte* a, int aBytes, byte* b, int bBytes)
+    {
+        nuint aa = (nuint)a, bb = (nuint)b;
+        return aa < bb + (nuint)bBytes && bb < aa + (nuint)aBytes;
+    }
+
+    private static ulong Fnv1aHash(byte* ptr, long bytes)
+    {
+        const ulong off = 14695981039346656037UL, prime = 1099511628211UL;
+        ulong h = off;
+        long i = 0, stop = bytes - 7;
+        for (; i < stop; i += 8) { h ^= *(ulong*)(ptr + i); h *= prime; }
+        for (; i < bytes;  i++) { h ^= ptr[i];              h *= prime; }
+        return h;
     }
     
     public void Dispose()
