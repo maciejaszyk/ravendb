@@ -1,18 +1,14 @@
-﻿#if MEM_GUARD_STACK
 using System;
+using Sparrow.Json;
+using Sparrow.Platform;
+#if MEM_GUARD_STACK
 using System.Threading;
 using Sparrow.Collections;
-using Sparrow.Json;
 #endif
-
-using Sparrow.Platform;
 
 namespace Sparrow.Server.Debugging
 {
-    internal sealed unsafe class ElectricFencedMemory
-#if MEM_GUARD_STACK
-        : Sparrow.Debugging.DebugStuff.IElectricFencedMemory
-#endif
+    internal sealed unsafe class ElectricFencedMemory : Sparrow.Debugging.DebugStuff.IElectricFencedMemory
     {
         public static ElectricFencedMemory Instance = new ElectricFencedMemory();
 
@@ -33,28 +29,36 @@ namespace Sparrow.Server.Debugging
 
         public int ContextCount;
 
+#endif
+
         public void IncrementContext()
         {
+#if MEM_GUARD_STACK
             Interlocked.Increment(ref ContextCount);
+#endif
         }
 
         public void DecrementContext()
         {
+#if MEM_GUARD_STACK
             Interlocked.Decrement(ref ContextCount);
+#endif
         }
 
         public void RegisterContextAllocation(JsonOperationContext context, string stackTrace)
         {
+#if MEM_GUARD_STACK
             ContextAllocations.TryAdd(context, stackTrace);
+#endif
         }
 
         public void UnregisterContextAllocation(JsonOperationContext context)
         {
+#if MEM_GUARD_STACK
             string _;
             ContextAllocations.TryRemove(context, out _);
-        }
-
 #endif
+        }
 
         public byte* Allocate(int size)
         {

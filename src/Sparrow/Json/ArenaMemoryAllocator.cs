@@ -11,6 +11,7 @@ using Sparrow.Threading;
 
 #if MEM_GUARD
 using Sparrow.Platform;
+using Sparrow.Debugging;
 #endif
 
 using Sparrow.Utils;
@@ -122,11 +123,7 @@ namespace Sparrow.Json
                 goto ErrorResetted;
 
 #if MEM_GUARD
-            return new AllocatedMemoryData
-            {
-                Address = ElectricFencedMemory.Allocate(size),
-                SizeInBytes = size
-            };
+            return new AllocatedMemoryData(DebugStuff.ElectricFencedMemory.Allocate(size), size);
 #else
             if (size < 0)
                 throw new ArgumentOutOfRangeException(nameof(size), size,
@@ -385,7 +382,7 @@ namespace Sparrow.Json
             if (allocation.FreedBy == null)
                 allocation.FreedBy = Environment.StackTrace;
 #endif
-            ElectricFencedMemory.Free(address);
+            DebugStuff.ElectricFencedMemory.Free(address);
 #else
 
             if (address != _ptrCurrent - allocation.SizeInBytes ||

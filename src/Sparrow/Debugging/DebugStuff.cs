@@ -15,6 +15,10 @@ namespace Sparrow.Debugging
             void RegisterContextAllocation(JsonOperationContext context, string stackTrace);
 
             void UnregisterContextAllocation(JsonOperationContext context);
+
+            unsafe byte* Allocate(int size);
+
+            unsafe void Free(byte* p);
         }
     }
 }

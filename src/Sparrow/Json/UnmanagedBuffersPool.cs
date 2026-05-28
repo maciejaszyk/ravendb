@@ -5,6 +5,7 @@ using Sparrow.Logging;
 using Sparrow.LowMemory;
 #if MEM_GUARD
 using Sparrow.Platform;
+using Sparrow.Debugging;
 #endif
 using Sparrow.Utils;
 
@@ -116,11 +117,7 @@ namespace Sparrow.Json
         public AllocatedMemoryData Allocate(int size)
         {
 #if MEM_GUARD
-            return new AllocatedMemoryData
-            {
-                SizeInBytes = size,
-                Address = ElectricFencedMemory.Allocate(size),
-            };
+            return new AllocatedMemoryData(DebugStuff.ElectricFencedMemory.Allocate(size), size);
 #else
 
             var actualSize = Bits.PowerOf2(size);
@@ -187,7 +184,7 @@ namespace Sparrow.Json
         public void Return(AllocatedMemoryData returned)
         {
 #if MEM_GUARD
-            ElectricFencedMemory.Free(returned.Address);
+            DebugStuff.ElectricFencedMemory.Free(returned.Address);
 #else
 
             if (returned == null) throw new ArgumentNullException(nameof(returned));
