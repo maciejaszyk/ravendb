@@ -24,16 +24,19 @@ namespace Raven.Server.Documents.Handlers.Processors.Documents;
 
 internal sealed class DocumentHandlerProcessorForGet : AbstractDocumentHandlerProcessorForGet<DocumentHandler, DocumentsOperationContext, Document>
 {
-    private readonly OperationCancelToken _cts;
+    private OperationCancelToken _cts;
 
     public DocumentHandlerProcessorForGet(HttpMethod method, [NotNull] DocumentHandler requestHandler, [CanBeNull] List<ReadOnlyMemory<char>> ids = null) : base(method, requestHandler, ids)
     {
-        _cts = RequestHandler.CreateHttpRequestBoundOperationToken();
     }
 
     protected override bool SupportsShowingRequestInTrafficWatch => true;
 
-    protected override CancellationToken CancellationToken => _cts.Token;
+    protected override CancellationToken CancellationToken => (_cts ??= RequestHandler.CreateHttpRequestBoundOperationToken()).Token;
+
+    protected override CancellationToken GetByIdCancellationToken => RequestHandler.HttpContext.RequestAborted;
+
+    protected override CancellationToken GetByIdResponseWriterCancellationToken => default;
 
     protected override ValueTask<DocumentsByIdResult<Document>> GetDocumentsByIdImplAsync(
         DocumentsOperationContext context,

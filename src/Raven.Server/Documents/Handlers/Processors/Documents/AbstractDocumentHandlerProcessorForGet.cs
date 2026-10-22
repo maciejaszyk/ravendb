@@ -59,6 +59,10 @@ internal abstract class
 
     protected abstract CancellationToken CancellationToken { get; }
 
+    protected virtual CancellationToken GetByIdCancellationToken => CancellationToken;
+
+    protected virtual CancellationToken GetByIdResponseWriterCancellationToken => CancellationToken;
+
     public sealed override ValueTask ExecuteAsync()
     {
         // The reason behind this is to avoid awaiting execution in the handler and do it directly in the router code.
@@ -255,13 +259,14 @@ internal abstract class
     {
         long numberOfResults;
         long totalDocumentsSizeInBytes;
-        await using (var writer = new AsyncBlittableJsonTextWriter(context, RequestHandler.ResponseBodyStream(), CancellationToken))
+        var token = GetByIdCancellationToken;
+        await using (var writer = new AsyncBlittableJsonTextWriter(context, RequestHandler.ResponseBodyStream(), GetByIdResponseWriterCancellationToken))
         {
             writer.WriteStartObject();
 
             writer.WritePropertyName(nameof(GetDocumentsResult.Results));
 
-            var writeDocumentsValueTaskAsync = WriteDocumentsAsync(writer, context, result.Documents, metadataOnly, CancellationToken);
+            var writeDocumentsValueTaskAsync = WriteDocumentsAsync(writer, context, result.Documents, metadataOnly, token);
             
             (numberOfResults, totalDocumentsSizeInBytes) = writeDocumentsValueTaskAsync.IsCompletedSuccessfully 
                 ? writeDocumentsValueTaskAsync.Result 
@@ -270,7 +275,7 @@ internal abstract class
 
             writer.WriteComma();
 
-            var includeAsync = WriteIncludesAsync(writer, context, nameof(GetDocumentsResult.Includes), result.Includes, CancellationToken);
+            var includeAsync = WriteIncludesAsync(writer, context, nameof(GetDocumentsResult.Includes), result.Includes, token);
             if (includeAsync.IsCompletedSuccessfully == false)
                 await includeAsync;
 
@@ -278,7 +283,7 @@ internal abstract class
             {
                 writer.WriteComma();
                 writer.WritePropertyName(nameof(GetDocumentsResult.CounterIncludes));
-                var writeCounterIncludes = result.CounterIncludes.WriteIncludesAsync(writer, context, CancellationToken);
+                var writeCounterIncludes = result.CounterIncludes.WriteIncludesAsync(writer, context, token);
                 if (writeCounterIncludes.IsCompletedSuccessfully == false)    
                     await writeCounterIncludes;
             }
@@ -287,7 +292,7 @@ internal abstract class
             {
                 writer.WriteComma();
                 writer.WritePropertyName(nameof(GetDocumentsResult.TimeSeriesIncludes));
-                var writeTimeSeries = result.TimeSeriesIncludes.WriteIncludesAsync(writer, context, CancellationToken);
+                var writeTimeSeries = result.TimeSeriesIncludes.WriteIncludesAsync(writer, context, token);
                 if (writeTimeSeries.IsCompletedSuccessfully == false)
                     await writeTimeSeries;
             }
@@ -297,7 +302,7 @@ internal abstract class
                 writer.WriteComma();
                 writer.WritePropertyName(nameof(GetDocumentsResult.RevisionIncludes));
                 writer.WriteStartArray();
-                var writeRevisionIncludes = result.RevisionIncludes.WriteIncludesAsync(writer, context, CancellationToken);
+                var writeRevisionIncludes = result.RevisionIncludes.WriteIncludesAsync(writer, context, token);
                 if (writeRevisionIncludes.IsCompletedSuccessfully == false)
                     await writeRevisionIncludes;
                 writer.WriteEndArray();
@@ -307,7 +312,7 @@ internal abstract class
             {
                 writer.WriteComma();
                 writer.WritePropertyName(nameof(GetDocumentsResult.CompareExchangeValueIncludes));
-                var writeCompareExchange = writer.WriteCompareExchangeValuesAsync(result.CompareExchangeIncludes, CancellationToken);
+                var writeCompareExchange = writer.WriteCompareExchangeValuesAsync(result.CompareExchangeIncludes, token);
                 if (writeCompareExchange.IsCompletedSuccessfully == false)
                     await writeCompareExchange;
             }
